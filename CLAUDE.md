@@ -1,57 +1,192 @@
-# Artificial Brain — context for Claude Code
+# Artificial Brain: context for Claude Code
 
-Handoff from the Cowork ideation session (Sept 2026). Owner: Pavvy (Fedora, first-year RVCE student).
-Style: casual, concise back-and-forth. Ask before building big new pieces.
+Owner: Pavvy (Fedora, first-year RVCE student). Idea handed off from the Cowork session (Sept 2026).
+Style in interactive sessions: casual, short back-and-forth. Ask before building big new pieces.
+
+> **Overnight / cloud build mode.** When a session is asked to "build the project" from this file, don't
+> stop to ask questions. Work through the milestones below in order. Make sensible calls and log each one
+> in `DECISIONS.md` (one line: what you chose and why). Commit after each milestone. Every commit must
+> build. If something needs Pavvy (tokens, local models, a real display), build it with a clean fallback
+> and list it in `TODO-PAVVY.md`.
 
 ## Vision
-Obsidian-like personal knowledge base, but smarter and more visual: a 3D graph ("artificial brain")
-with an AI agent living in it. Cross-platform DESKTOP app (not a website). Currently on Fedora.
+A personal knowledge base that feels like **Obsidian on steroids**: the same calm, dense, keyboard-first
+workspace (markdown files, wikilinks, backlinks, tabs, command palette), plus a 3D/2D graph "brain",
+typed items (links, skills, hackathons, projects), and an AI that lives in the graph.
+It's a cross-platform **desktop** app, not a website. Main target: Fedora (GNOME, Wayland).
+It's separate from "Jarvis", Pavvy's local life-assistant project. Don't mix the two.
 
-Node types:
-- note: own notes
-- link: saved links. A global shortcut opens a tiny window: paste a URL, close it, and it becomes a node.
-  On save, fetch + summarise + embed the page so it doesn't become a bookmark graveyard.
-- skill: skills learnt, entered by hand as a form, so for a new project he knows what options he has.
-- hackathon: attended + what was built, a form (date, role, built, stack).
-- project: synced from GitHub via a fine-grained read-only personal access token.
+Item types:
+- **note**: normal markdown notes.
+- **link**: a saved URL. A quick-capture window takes a pasted URL and turns it into a node. On save, the
+  page is fetched, summarised and embedded, so saved links don't turn into a bookmark graveyard.
+- **skill**: a skill Pavvy has learnt, entered with a form. Starting a new project, he can see what he knows.
+- **hackathon**: one he attended and what he built, entered with a form (date, role, built, stack, ...).
+- **project**: synced from GitHub with a fine-grained, read-only personal access token.
 
-## Decisions made
-- Stack: Tauri v2 (Rust) + Vite + vanilla JS + three.js via 3d-force-graph (+ three-spritetext).
-- Store notes as plain markdown files + SQLite metadata, so there's no lock-in and Obsidian can still open them.
-- Tagging: the AI *suggests* 2–3 tags chosen only from existing tags; the user accepts with one key.
-  Untagged items go to an Inbox. No auto-folders (tags + graph make them redundant).
-- Links: explicit [[wikilinks]] are solid lines. Embedding-similarity links are faint "suggested" ones.
-- Graph readability: lobes/clusters (colour = lobe, shape = type), focus mode (node + 1–2 hops, rest fades),
-  semantic zoom (lobe names far away, node labels up close), type filters. Later: UMAP of embeddings
-  for starting positions.
-- Search = command palette (Ctrl K or /). The selected result flies from its spot in the graph into the side
-  panel (travel animation). Keep it short and skippable.
-- Right-click AI actions (on demand, show a diff, keep the original, never add facts): Polish, Summarize,
-  Fill form from messy text. Provider is configurable: local llama.cpp server or Groq (both OpenAI-compatible APIs).
-- This is SEPARATE from "Jarvis" (his local life-assistant project).
+## Design direction (important)
+It must **not look AI-generated**. Think Obsidian or a good code editor: quiet, flat, dense, functional.
+Keep it simple and solid-coloured for now. Pavvy will ask for visual changes later.
+
+Do:
+- Solid, flat colours. 1px borders. Small radius (4–6px). Obsidian-like density (13–14px UI text,
+  tight padding). System font stack (`Inter` only if already present, else system-ui), monospace for code.
+- One neutral dark theme (default) and a light theme, both from CSS variables in one `theme.css`.
+  Suggested dark: bg `#1e1e1e`, sidebars `#181818`, raised `#252525`, border `#2e2e2e`, text `#dcddde`,
+  muted `#999`, faint `#666`. One accent colour (a calm blue or violet, e.g. `#7c8cff`). No other decorative colour.
+- Lobe colours are the only "colourful" part. Use them as plain solid fills in the graph and as small dots in lists.
+- One icon set: Lucide SVGs (stroke 1.5, 16px), inlined. No emoji anywhere in the UI.
+- Plain, short, lowercase-ish labels ("New note", "Save link", "Sync now"). No marketing copy, no
+  exclamation marks, no "magic" wording. AI features look like normal features: no sparkle icons, no
+  purple gradients, no "✨ AI".
+- Motion: fast (120–200ms), ease-out, only where it explains something (panel open, fly-to-node).
+  Respect `prefers-reduced-motion`.
+
+Don't:
+- No gradients, glassmorphism/backdrop-blur, glows, neon, bloom, vignettes, drop shadows (except
+  one subtle shadow on popovers/menus), animated backgrounds, or particle effects.
+- No big rounded "cards" floating over the graph. Panels are docked, like Obsidian's.
+- No hero sections, splash screens, empty-state illustrations or onboarding carousels.
+
+The current MVP UI (glass panels, glow sprites, additive halos, link particles, glowing travel arc,
+vignette) **breaks these rules and must be restyled** in Milestone 1.
+
+## Layout (Obsidian-style)
+```
+┌ribbon┬ left sidebar ──┬ workspace (tabs) ─────────────────┬ right sidebar ───┐
+│ icons│ Files | Tags  │ [Graph] [Note A] [Note B]  +       │ Backlinks        │
+│      │ Inbox | Types │                                    │ Outgoing links   │
+│      │ (lobe dots)   │  graph view  OR  markdown editor   │ Suggested (AI)   │
+│      │               │                                    │ Properties/form  │
+│      │               │                                    │ Ask (agent chat) │
+├──────┴───────────────┴────────────────────────────────────┴──────────────────┤
+│ status bar: vault · words · backlinks · AI provider status · last sync       │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+- The left and right sidebars can be collapsed and resized. Their state is remembered.
+- The graph is a workspace tab (always available; Ctrl G focuses it). Notes open in tabs.
+- Clicking a node in the graph focuses it (focus mode) and shows it in the right sidebar.
+  Double-click or Enter opens it in a tab.
+
+## Stack and decisions
+- Tauri v2 (Rust) + Vite + vanilla JS (ES modules, no framework) + three.js via 3d-force-graph
+  (+ three-spritetext).
+- Editor: CodeMirror 6 (markdown mode). It has a "Reading" view rendered with markdown-it; Ctrl E toggles.
+  `[[` autocompletes titles, Ctrl+click follows a wikilink, autosave after a 500ms debounce.
+- **Files are the source of truth.** A vault folder of plain markdown with YAML frontmatter, which
+  Obsidian can open. SQLite (rusqlite, bundled, FTS5) is only an index/cache and can be rebuilt from the
+  files at any time ("Rebuild index" command). A file watcher (`notify`) picks up edits made outside the app.
+- Tagging: the AI *suggests* 2–3 tags, chosen only from tags that already exist. The user accepts them
+  with one key (Ctrl Enter accepts all). Untagged items go to the **Inbox**. No automatic folders.
+- Links: explicit `[[wikilinks]]` are solid lines. Embedding-similarity links are faint dashed "suggested"
+  lines, and they are never written into files unless the user accepts one (which inserts a wikilink).
+- Graph readability: lobes (colour = lobe, shape = type), focus mode (the node plus 1–2 hops, the rest
+  fades), semantic zoom (lobe names from far away, node labels up close), type filters, and a **2D/3D
+  switch** (already built: V key or the top-bar toggle; 2D flattens the same scene and locks the camera
+  top-down). Later: UMAP of embeddings for starting positions.
+- Search = palette (Ctrl K or /). Commands = palette (Ctrl P). The selected result flies from its spot in
+  the graph to where it opens. Keep that animation short, plain (a flat card, no glow) and skippable.
+- Right-click AI actions (on demand; show a diff; keep the original; never add facts): Polish, Summarize,
+  Fill form from messy text. The provider is configurable: a local llama.cpp server or Groq (both use
+  OpenAI-compatible APIs). Groq has no embeddings, so embeddings come only from the local llama.cpp server.
+  If that isn't available, fall back to shared-tag similarity.
+
+## Data model
+Vault: default `~/Brain` (can be changed in Settings, picked with the dialog plugin).
+```
+~/Brain/
+  notes/        *.md
+  links/        *.md
+  skills/       *.md
+  hackathons/   *.md
+  projects/     *.md
+  .brain/       lobes.json, history/ (originals kept by AI actions), attachments later
+```
+These are fixed per-type folders, not organisation. Users never sort into folders; tags and lobes do that.
+- File name = slugified title. The stable identity is `id:` (a ULID) in the frontmatter, so renames are safe.
+  Wikilinks resolve by title or file name, like Obsidian (`[[Title]]`, `[[Title|alias]]`).
+  Renaming a note updates the wikilinks that point to it.
+- Common frontmatter: `id, type, title, lobe, tags, created, updated`.
+  - link: `url, site, summary, fetched, status (ok|failed|pending)`
+  - skill: `level (beginner|intermediate|advanced), since, used_in: [[project]]`
+  - hackathon: `date, location, role, team, built, stack, result, repo`
+  - project: `repo, description, languages, topics, stars, pushed_at, status, role` (fields from GitHub
+    are overwritten on sync; `status`, `role` and the body never are)
+- Lobes live in `.brain/lobes.json` (`id, name, color`), and are editable in Settings. Seed them with the six
+  from `src/data/sample.js`. The app computes lobe centres (evenly spread) instead of taking hand-written
+  coordinates. An item with no `lobe` goes into a grey "Unsorted" lobe. The AI can suggest a lobe the same way it suggests tags.
+- SQLite in the app data dir: `items`, `tags`, `links (src, dst, kind)`, `items_fts`, `embeddings (item_id, model, dim, vector BLOB)`.
+  Brute-force cosine is fine at personal scale.
+- Settings: `settings.json` in the app config dir (vault path, theme, AI provider base URL/model/key,
+  embedding URL/model, GitHub token, shortcuts). The file holding secrets gets 0600 permissions. Never log secrets.
+
+## Architecture rules
+- All frontend↔backend calls go through `src/api.js`. When `window.__TAURI_INTERNALS__` is missing, it
+  uses an in-memory **mock backend** seeded from `src/data/sample.js`. That way `npm run dev` works in a
+  plain browser, which is needed for screenshots/Playwright in the cloud where there is no display.
+- Rust: split `src-tauri/src/` into modules (`vault.rs`, `index.rs`, `watch.rs`, `ai.rs`, `embed.rs`,
+  `capture.rs`, `github.rs`, `settings.rs`, `commands.rs`). Commands return `Result<T, String>`.
+  Slow work (fetching, LLM calls, embedding, sync) runs async and reports progress with events.
+- Frontend: small modules (`shell/`, `graph/`, `editor/`, `palette/`, `sidebar/`, `forms/`, `ai/`).
+  Split the current `src/main.js` along these lines. Keep the existing graph behaviour working.
+- Unit tests for Rust: frontmatter parse/write round-trip, wikilink parsing and resolution, rename
+  rewriting, index rebuild, FTS search, cosine ranking. Tests must not use the network.
+
+## Milestones (work in this order; commit after each)
+1. **Shell + restyle.** `api.js` + mock backend. Obsidian layout (ribbon, sidebars, tabs, status bar).
+   `theme.css` with dark/light tokens. Restyle the graph flat: `MeshLambertMaterial`/`MeshBasicMaterial` in
+   solid lobe colours; remove glow sprites, additive halos, particles and the vignette; lobes shown by colour
+   and a plain name label; lines plain (solid for wikilinks, faint dashed for similar); idle orbit off by
+   default. Keep focus mode, semantic zoom, filters, fly-to-lobe, search travel (flattened) and 2D/3D.
+2. **Vault + index.** Vault create/open, CRUD commands, SQLite index + FTS, watcher, rebuild index.
+   Replace the sample data. Add a first-run empty state: plain text with "New note" and "Import sample data"
+   (the import writes the sample brain as real files). Remove `graph.json`/`load_graph`.
+3. **Editor + links.** CodeMirror editor in tabs, reading view, wikilink autocomplete/follow, backlinks and
+   outgoing panes, properties pane, tags pane, Inbox, rename with link rewriting.
+4. **Palettes.** Ctrl K search (FTS bm25; blended with embeddings once they exist), Ctrl P commands
+   (new note/link/skill/hackathon, toggle 2D/3D, toggle theme, sync GitHub, rebuild index, settings).
+5. **Quick capture.** A small undecorated, always-on-top `capture` window (about 480×120): paste a URL,
+   Enter saves, Esc closes. Global shortcut Ctrl Shift Space (tauri-plugin-global-shortcut). **Wayland
+   fallback:** global shortcuts often don't work on GNOME Wayland, so also support `brain --capture`
+   through tauri-plugin-single-instance, and put "bind a GNOME custom shortcut to `brain --capture`" in
+   `TODO-PAVVY.md`. Link pipeline in the background: fetch (reqwest, rustls) → title + main text →
+   summary (if AI configured) → embed → suggest tags/lobe. The node shows its pending/failed state; a
+   failure still keeps the URL and title.
+6. **Settings + AI layer.** Settings view (vault, theme, lobes editor, AI provider, embeddings, GitHub
+   token, test-connection buttons). An OpenAI-compatible client for chat + embeddings. Embed on save
+   (debounced), similarity links (top-k above a threshold) and search blending. Everything degrades
+   cleanly when no provider is set: the status bar says "AI off", and AI actions are disabled with a tooltip.
+7. **Forms + GitHub sync.** Forms for skill / hackathon / project in the properties pane and in a "New ..."
+   dialog. Fields write frontmatter; the body stays free markdown. GitHub sync: list repos
+   (`/user/repos`), languages, topics, README → project files; "Sync now" + auto-sync on startup if the
+   last sync is more than 24h old; never overwrite user fields or the body.
+8. **AI actions + tag suggestions.** Right-click on a node / editor selection: Polish, Summarize, Fill form
+   from messy text. Show a diff (jsdiff), Accept/Reject, save the original to `.brain/history/`. Prompts
+   must forbid adding facts. Tag and lobe suggestions appear as chips; Ctrl Enter accepts.
+9. **Ask (agent chat).** A right-sidebar pane. RAG: embed the question → top-k items + 1-hop neighbours
+   (FTS fallback) → answer with `[[wikilink]]` citations. Clicking a citation opens it; the cited nodes
+   light up in the graph via focus mode.
+10. **Wrap-up.** README (setup, features, shortcuts, Wayland note), `npm run build` + `cargo clippy` clean,
+    `npm run tauri build` if the environment allows, and final updates to `DECISIONS.md` / `TODO-PAVVY.md`.
+    Update the "Current state" section below.
+
+## Keyboard
+Ctrl K search · Ctrl P commands · Ctrl N new note · Ctrl G graph · Ctrl E edit/reading · Ctrl W close tab ·
+Ctrl Tab next tab · Ctrl Shift Space quick capture · Ctrl Enter accept suggestions · V 2D/3D (graph focused) ·
+Esc clear focus / close palette.
+
+## Cloud session notes
+- No display: Tauri windows can't be opened. Verify with `npm run build`, `cargo check`, `cargo test`,
+  `cargo clippy`, and browser mode (`npm run dev`, port 1420) + Playwright screenshots to check the look.
+- On Ubuntu, install the Tauri deps first: `libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev
+  librsvg2-dev libxdo-dev build-essential`.
+- Don't commit secrets, `node_modules`, `dist` or `target`.
 
 ## Current state
-- Graph view: lobes + halos, per-type shapes, focus mode, semantic zoom labels, legend filters, fly to lobe,
-  idle orbit, search palette + travel animation, detail panel. The Polish/Edit buttons are disabled placeholders.
-- Storage (step 1, done): markdown vault is the source of truth, SQLite (`brain.db`) is a rebuildable index.
-  - Vault: `$BRAIN_VAULT` or app-data-dir/vault (Linux: ~/.local/share/dev.pavvy.brain/vault), index in
-    app-data-dir/brain.db. Layout: notes/, links/, skills/, hackathons/, projects/ as `<Title>.md`; deletes go to .trash/.
-  - File = YAML frontmatter (id, type, lobe, title only if the filename had to change, tags, type fields, created,
-    updated) + markdown body. [[Wikilinks]] (by filename, path or title) = explicit links. Hand-made/Obsidian files
-    work too (id falls back to path, type to folder). `load_graph` syncs by mtime+size before returning.
-  - Rust commands: load_graph, sync_vault, get_node, create_node, update_node (null removes a field; title change
-    renames the file and rewrites [[backlinks]]), delete_node, list_tags, import_graph, vault_path.
-    JS wrapper: src/store.js (also on `window.brain.store` for devtools).
-  - Empty vault -> sample data (src/data/sample.js) with an "import into vault" chip.
-  - "Similar" links are still shared-tag stand-ins (src/data/similar.js) until embeddings.
-- Code map: src/main.js (graph, forces, focus, zoom, wiring), search.js, travel.js, panel.js, shapes.js, store.js,
-  src-tauri/src/{lib.rs (commands), store.rs (vault + index), markdown.rs (frontmatter, wikilinks)}.
-- Run: `npm install && npm run tauri dev` (UI only in a browser: `npm run dev`, port 1420). Tests: `cd src-tauri && cargo test`.
-
-## Next steps (agreed order)
-1. ~~Storage: markdown + SQLite, Rust CRUD commands, replace sample data.~~ Done (no create/edit UI yet).
-2. Quick-capture window + global shortcut (tauri-plugin-global-shortcut).
-3. Embeddings (llama.cpp) → real similarity links + search blending.
-4. Forms for skills / hackathons / projects; GitHub sync.
-5. Right-click AI actions.
-6. Resident agent chat over the graph (RAG).
+- MVP graph view only, running on sample data (`src/data/sample.js`). Rust `load_graph` reads
+  `graph.json` from the app data dir if it exists.
+- Working: lobes + halos, per-type shapes, focus mode, semantic zoom labels, legend filters, fly to lobe,
+  idle orbit, 2D/3D switch (V), search palette + travel animation, detail panel. Polish/Edit are placeholders.
+- Code map: `src/main.js` (graph, forces, focus, zoom, 2D/3D, wiring), `search.js`, `travel.js`,
+  `panel.js`, `shapes.js`, `util.js`, `src-tauri/src/lib.rs`.
+- Run: `npm install && npm run tauri dev` (UI only, in a browser: `npm run dev`, port 1420).
