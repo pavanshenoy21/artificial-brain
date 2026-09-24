@@ -76,7 +76,6 @@ export function createMockBackend({ seed = true } = {}) {
 
   const api = {
     async loadGraph() {
-      await ready;
       return { nodes: [...items.values()].map(clone), links: links(), lobes: clone(lobes) };
     },
     async getItem(id) {
@@ -209,5 +208,10 @@ export function createMockBackend({ seed = true } = {}) {
   };
 
   const ready = seed ? api.importSample() : Promise.resolve();
-  return api;
+  // every call waits for the seed, so nothing sees a half-filled vault
+  const guarded = { onChange: api.onChange };
+  for (const [k, fn] of Object.entries(api))
+    if (k !== "onChange" && k !== "importSample") guarded[k] = async (...a) => { await ready; return fn(...a); };
+  guarded.importSample = api.importSample;
+  return guarded;
 }

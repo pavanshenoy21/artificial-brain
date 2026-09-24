@@ -48,3 +48,10 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - Delete is a two-step button (trash, then "Confirm" for 3s) instead of a modal; files go to `.trash/`.
 - Sample skill levels lowercased to match the data model (beginner|intermediate|advanced).
 - Vite chunk-size warning raised to 3 MB: the single bundle loads from disk inside the desktop app.
+
+## Milestone 4: palettes
+- One palette component (`palette/palette.js`) drives both Ctrl K search and Ctrl P commands.
+- Search goes through `api.search` (FTS5 bm25 in Rust); an empty query lists recently updated items. The body snippet with highlighted matches replaces the tag line when the match is in the body.
+- Semantic blending is a pluggable hook (`setSemanticSearch`) + `lib/rank.js#blend`: keyword scores normalised to the best hit, weighted 0.55 keyword / 0.45 semantic; semantic-only hits need ≥ 0.35 similarity.
+- Commands: a registry (`registerCommand`) with optional `when` (hide) and `disabled` (shown greyed with a reason). Subsequence fuzzy match with word-start bonus; recently used commands float up.
+- Frontend unit tests: `npm test` runs `node --test` on the DOM-free modules (wikilinks, ranking, lobe layout, mock backend). The mock waits for its seed on every call (a test caught search racing the seed).

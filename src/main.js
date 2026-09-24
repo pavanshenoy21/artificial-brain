@@ -17,6 +17,8 @@ import { esc, reduceMotion } from "./util.js";
 import { prefs } from "./lib/prefs.js";
 import { initEmptyState } from "./shell/empty.js";
 import { newItem } from "./actions.js";
+import { openCommands } from "./palette/commands.js";
+import { registerCoreCommands } from "./core-commands.js";
 
 // ------------------------------------------------------------------ tabs + graph
 let graph;
@@ -79,6 +81,7 @@ const search = () => openSearch({ onPick: openFromSearch });
 ribbonButton({ iconName: "panel-left", title: "Toggle left sidebar", onClick: () => left.toggle() });
 ribbonButton({ iconName: "search", title: "Search (Ctrl K)", onClick: search });
 ribbonButton({ iconName: "graph", title: "Graph (Ctrl G)", onClick: () => tabs.activate("graph") });
+ribbonButton({ iconName: "command", title: "Commands (Ctrl P)", onClick: openCommands });
 ribbonButton({ iconName: "plus", title: "New note (Ctrl N)", onClick: () => newItem("note") });
 
 const themeBtn = ribbonButton({
@@ -91,6 +94,8 @@ function setTheme(t) {
   graph.applyTheme();
 }
 
+registerCoreCommands({ graph, tabs, left, right, search, setTheme });
+
 // ------------------------------------------------------------------ keyboard
 const typing = () => {
   const a = document.activeElement;
@@ -101,6 +106,7 @@ window.addEventListener("keydown", e => {
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
   if (mod && k === "k") { e.preventDefault(); paletteOpen() ? closePalette() : search(); return; }
+  if (mod && k === "p") { e.preventDefault(); paletteOpen() ? closePalette() : openCommands(); return; }
   if (paletteOpen()) return;
   if (!mod && e.key === "/" && !typing()) { e.preventDefault(); search(); return; }
   if (mod && k === "g") { e.preventDefault(); tabs.activate("graph"); return; }

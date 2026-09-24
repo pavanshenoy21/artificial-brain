@@ -281,3 +281,5 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .tag-edit .tag button { display: grid; place-items: center; width: 15px; height: 15px; padding: 0; background: none; border: 0; color: inherit; opacity: .6; border-radius: 2px; }
 .tag-edit .tag button:hover { opacity: 1; background: var(--accent-soft); }
 .tag-edit input { flex: 1; min-width: 60px; width: auto; }
+.r-icon { color: var(--muted); display: grid; place-items: center; width: 16px; }
+.r-disabled .r-title { color: var(--faint); }

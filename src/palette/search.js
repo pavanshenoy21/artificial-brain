@@ -1,46 +1,38 @@
-// Ctrl K / "/" search over items. Milestone 1: keyword scoring in the browser.
-// (Milestone 4 moves this to FTS in the backend.)
+// Ctrl K / "/" search. Results come from the backend's full-text index
+// (FTS5 bm25 in Rust, a rough stand-in in the mock). Once embeddings exist
+// (milestone 6) a semantic score is blended in via setSemanticSearch().
 
 import { app } from "../state.js";
+import { api } from "../api.js";
 import { openPalette } from "./palette.js";
 import { typeIcon } from "../icons.js";
 import { TYPE } from "../lib/types.js";
 import { esc } from "../util.js";
+import { blend } from "../lib/rank.js";
 
 const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-function haystacks(n) {
-  return {
-    title: n.title.toLowerCase(),
-    tags: (n.tags || []).join(" ").toLowerCase(),
-    text: [n.body, n.summary, n.built, n.url, ...(Array.isArray(n.stack) ? n.stack : [])].filter(Boolean).join(" ").toLowerCase(),
-  };
-}
+// Optional semantic ranker: (query) => Promise<[{ id, score (0..1) }]>
+let semantic = null;
+export function setSemanticSearch(fn) { semantic = fn; }
 
-// Every token must match somewhere; title matches weigh most.
-function score(h, tokens) {
-  let s = 0;
-  for (const t of tokens) {
-    if (h.title.startsWith(t)) s += 10;
-    else if (h.title.includes(" " + t)) s += 7;
-    else if (h.title.includes(t)) s += 5;
-    else if (h.tags.includes(t)) s += 3;
-    else if (h.text.includes(t)) s += 1;
-    else return 0;
+async function source(q) {
+  if (!q.trim()) {
+    // no query: recently updated first, then most connected
+    return [...app.items.values()]
+      .sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")) || (b.degree || 0) - (a.degree || 0))
+      .slice(0, 8)
+      .map(n => ({ n, snippet: "" }));
   }
-  return s;
-}
-
-export function localSearch(query, limit = 12) {
-  const tokens = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  const nodes = [...app.items.values()];
-  if (!tokens.length) return nodes.sort((a, b) => (b.degree || 0) - (a.degree || 0)).slice(0, 8);
-  return nodes
-    .map(n => ({ n, s: score(haystacks(n), tokens) }))
-    .filter(x => x.s > 0)
-    .sort((a, b) => b.s - a.s || a.n.title.localeCompare(b.n.title))
-    .slice(0, limit)
-    .map(x => x.n);
+  let hits = await api.search(q, 30).catch(() => []);
+  if (semantic) {
+    const sem = await semantic(q).catch(() => []);
+    hits = blend(hits, sem);
+  }
+  return hits
+    .map(h => ({ n: app.items.get(h.id), snippet: h.snippet, semantic: h.semantic }))
+    .filter(r => r.n)
+    .slice(0, 14);
 }
 
 function highlight(title, query) {
@@ -51,20 +43,25 @@ function highlight(title, query) {
   return out.replace(re, "<mark>$1</mark>");
 }
 
+const snippetHtml = s => esc(s.replace(/\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_, t, a) => a || t))
+  .replace(/\u0001/g, "<mark>").replace(/\u0002/g, "</mark>");
+
 export function openSearch({ onPick }) {
   openPalette({
     id: "search",
     placeholder: "Search notes, links, skills, projects",
     empty: "No matches",
     foot: `<span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Ctrl Enter</kbd> open in tab</span><span><kbd>Esc</kbd> close</span>`,
-    source: async q => localSearch(q),
-    render: (n, q) => {
+    source,
+    render: ({ n, snippet }, q) => {
       const lobe = app.lobeOf(n);
-      const meta = [TYPE[n.type]?.one, ...(n.tags || []).slice(0, 3).map(t => "#" + t)].filter(Boolean).join(" · ");
+      const meta = snippet?.includes("\u0001")
+        ? snippetHtml(snippet)
+        : esc([TYPE[n.type]?.one, ...(n.tags || []).slice(0, 3).map(t => "#" + t)].filter(Boolean).join(" · "));
       return `${typeIcon(n.type, lobe.color, 13)}
-        <div class="r-main"><div class="r-title">${highlight(n.title, q)}</div><div class="r-meta">${esc(meta)}</div></div>
+        <div class="r-main"><div class="r-title">${highlight(n.title, q)}</div><div class="r-meta">${meta}</div></div>
         <span class="r-side"><span class="dot" style="background:${lobe.color}"></span>${esc(lobe.name)}</span>`;
     },
-    onPick,
+    onPick: (r, opts) => onPick(r.n, opts),
   });
 }
