@@ -82,7 +82,14 @@ function sidebar(side, defaults) {
   resizer.addEventListener("dblclick", () => { st.width = defaults.width; save(); apply(); });
 
   apply();
-  return { add, show, toggle, get open() { return st.open; }, get view() { return st.view; } };
+  // Small count on a view's icon (e.g. Inbox).
+  function badge(id, n) {
+    const v = views.find(x => x.id === id);
+    if (!v) return;
+    v.tab.dataset.badge = n > 0 ? (n > 99 ? "99+" : n) : "";
+  }
+
+  return { add, show, toggle, badge, get open() { return st.open; }, get view() { return st.view; } };
 }
 
 export const left = sidebar("left", { open: true, width: 250, view: "files" });

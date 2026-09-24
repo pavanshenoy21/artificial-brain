@@ -16,6 +16,7 @@ import { typeIcon } from "./icons.js";
 import { esc, reduceMotion } from "./util.js";
 import { prefs } from "./lib/prefs.js";
 import { initEmptyState } from "./shell/empty.js";
+import { newItem } from "./actions.js";
 
 // ------------------------------------------------------------------ tabs + graph
 let graph;
@@ -40,7 +41,7 @@ app.on("select", ({ id, source }) => {
   if (!n) return;
   if (source !== "graph-search") graph.focusNode(n, { fly: source !== "graph" && source !== "tab" });
 });
-app.on("open", ({ id, mode }) => tabs.openItem(id, { mode }));
+app.on("open", ({ id, mode, focusTitle }) => tabs.openItem(id, { mode, focusTitle }));
 app.on("show-graph", () => tabs.activate("graph"));
 app.on("graph-focus-cleared", () => { app.selected = null; app.emit("select", { id: null }); });
 app.on("data", () => {
@@ -78,6 +79,7 @@ const search = () => openSearch({ onPick: openFromSearch });
 ribbonButton({ iconName: "panel-left", title: "Toggle left sidebar", onClick: () => left.toggle() });
 ribbonButton({ iconName: "search", title: "Search (Ctrl K)", onClick: search });
 ribbonButton({ iconName: "graph", title: "Graph (Ctrl G)", onClick: () => tabs.activate("graph") });
+ribbonButton({ iconName: "plus", title: "New note (Ctrl N)", onClick: () => newItem("note") });
 
 const themeBtn = ribbonButton({
   iconName: "sun", title: "Toggle theme", bottom: true,
@@ -104,6 +106,8 @@ window.addEventListener("keydown", e => {
   if (mod && k === "g") { e.preventDefault(); tabs.activate("graph"); return; }
   if (mod && k === "w") { e.preventDefault(); tabs.closeActive(); return; }
   if (mod && e.key === "Tab") { e.preventDefault(); tabs.next(e.shiftKey ? -1 : 1); return; }
+  if (mod && k === "n" && !e.shiftKey) { e.preventDefault(); newItem("note"); return; }
+  if (mod && k === "e") { e.preventDefault(); tabs.active?.view.toggleMode?.(); return; }
   if (typing() || mod || e.altKey) return;
   if (graphActive()) {
     if (k === "v") graph.toggleView();

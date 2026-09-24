@@ -4,5 +4,6 @@ import { defineConfig } from "vite";
 export default defineConfig({
   clearScreen: false,
   server: { port: 1420, strictPort: true, watch: { ignored: ["**/src-tauri/**"] } },
-  build: { target: "es2022", chunkSizeWarningLimit: 2000 },
+  // One bundle is fine: it loads from disk inside the desktop app (three.js + CodeMirror ≈ 2 MB).
+  build: { target: "es2022", chunkSizeWarningLimit: 3000 },
 });

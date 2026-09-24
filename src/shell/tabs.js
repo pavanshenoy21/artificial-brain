@@ -70,9 +70,9 @@ export const tabsApi = {
   },
 
   // Open an item in a tab (reuses its tab if already open).
-  openItem(id, { background = false, mode } = {}) {
+  openItem(id, { background = false, mode, focusTitle = false } = {}) {
     let t = tabs.find(x => x.kind === "item" && x.id === id);
-    if (!t) t = makeTab("item", { key: `item:${id}`, id, mode });
+    if (!t) t = makeTab("item", { key: `item:${id}`, id, mode, focusTitle });
     else if (mode) t.view.setMode?.(mode);
     if (!background) activate(t);
     else renderBar();

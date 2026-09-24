@@ -76,11 +76,9 @@ export function initLeftSidebar({ graph }) {
     const counts = new Map();
     for (const n of app.items.values()) for (const t of n.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
     const sorted = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    const untagged = [...app.items.values()].filter(n => !n.tags?.length);
     tagsPane.innerHTML = `<div class="tree">
-      ${untagged.length ? tagGroup("", `Untagged`, untagged) : ""}
       ${sorted.map(([t, c]) => tagGroup(t, `#${t}`, [...app.items.values()].filter(n => n.tags?.includes(t)), c)).join("")}
-      ${!sorted.length && !untagged.length ? `<div class="empty-note">No tags yet.</div>` : ""}
+      ${!sorted.length ? `<div class="empty-note">No tags yet.</div>` : ""}
     </div>`;
   }
   function tagGroup(key, label, items, count = items.length) {
@@ -104,6 +102,24 @@ export function initLeftSidebar({ graph }) {
     if (r) app.select(r.dataset.id, { source: "list" });
   });
   tagsPane.addEventListener("dblclick", e => {
+    const r = e.target.closest(".item-row");
+    if (r) app.open(r.dataset.id);
+  });
+
+  // ---------------------------------------------------------------- inbox
+  // Untagged items wait here until they get a tag.
+  const inbox = left.add({ id: "inbox", title: "Inbox (untagged)", iconName: "inbox" });
+  function renderInbox() {
+    const items = [...app.items.values()].filter(n => !n.tags?.length).sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")) || a.title.localeCompare(b.title));
+    inbox.innerHTML = `<div class="side-label">Inbox<span class="count">${items.length}</span></div>
+      <div class="tree">${items.map(row).join("") || `<div class="empty-note">Nothing untagged.</div>`}</div>`;
+    left.badge("inbox", items.length);
+  }
+  inbox.addEventListener("click", e => {
+    const r = e.target.closest(".item-row");
+    if (r) app.select(r.dataset.id, { source: "list" });
+  });
+  inbox.addEventListener("dblclick", e => {
     const r = e.target.closest(".item-row");
     if (r) app.open(r.dataset.id);
   });
@@ -153,7 +169,7 @@ export function initLeftSidebar({ graph }) {
     }
   });
 
-  function renderAll() { renderFiles(); renderTags(); renderFilters(); }
+  function renderAll() { renderFiles(); renderTags(); renderInbox(); renderFilters(); }
   app.on("data", renderAll);
   app.on("graph-filters", renderFilters);
   app.on("select", () => {

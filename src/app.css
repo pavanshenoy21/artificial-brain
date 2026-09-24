@@ -242,3 +242,42 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 }
 .toast-error { border-color: var(--danger); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(4px); } }
+
+/* ---------------------------------------------------------------- milestone 3: editor, properties */
+.side-tab { position: relative; }
+.side-tab[data-badge]:not([data-badge=""])::after {
+  content: attr(data-badge); position: absolute; top: 1px; right: -2px; min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: 7px; background: var(--bg-active); color: var(--muted); font-size: 9.5px; line-height: 14px; text-align: center;
+}
+.doc-title-input {
+  display: block; width: 100%; margin: 8px 0 8px; padding: 0; border: 0; outline: none; resize: none; overflow: hidden;
+  background: none; color: var(--text); font: 700 26px/1.25 var(--font); min-height: 1.25em;
+}
+.doc-mode { margin-left: auto; }
+.doc-editor { min-height: 50vh; }
+.doc-editor .cm-editor { min-height: 50vh; }
+.row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.row-ctx { color: var(--faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-row.has-ctx { align-items: flex-start; padding-top: 4px; padding-bottom: 4px; }
+.item-row.has-ctx .i { margin-top: 3px; }
+.item-actions .fill { flex: 1; }
+.btn.quiet { background: none; border-color: transparent; color: var(--faint); padding: 0 6px; }
+.btn.quiet:hover { color: var(--danger); background: var(--bg-hover); }
+.btn.danger { border-color: var(--danger); color: var(--danger); }
+.props-form { display: flex; flex-direction: column; gap: 3px; padding: 2px 12px 6px; }
+.prop { display: grid; grid-template-columns: 78px 1fr auto; align-items: center; gap: 8px; min-height: 26px; font-size: 12.5px; }
+.prop > span:first-child { color: var(--muted); text-transform: capitalize; }
+.prop input, .prop select, .prop textarea {
+  width: 100%; min-width: 0; height: 24px; padding: 0 6px; background: transparent; border: 1px solid transparent;
+  border-radius: var(--radius); outline: none; font-size: 12.5px;
+}
+.prop textarea { height: auto; min-height: 24px; padding: 3px 6px; resize: vertical; font-family: var(--font); line-height: 1.4; }
+.prop select { padding: 0 2px; }
+.prop select option { background: var(--bg-raised); color: var(--text); }
+.prop input:hover, .prop select:hover, .prop textarea:hover { border-color: var(--border); }
+.prop input:focus, .prop select:focus, .prop textarea:focus { border-color: var(--accent); background: var(--bg); }
+.tag-edit { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; grid-column: 2 / 4; min-width: 0; }
+.tag-edit .tag { display: inline-flex; align-items: center; gap: 2px; padding-right: 2px; }
+.tag-edit .tag button { display: grid; place-items: center; width: 15px; height: 15px; padding: 0; background: none; border: 0; color: inherit; opacity: .6; border-radius: 2px; }
+.tag-edit .tag button:hover { opacity: 1; background: var(--accent-soft); }
+.tag-edit input { flex: 1; min-width: 60px; width: auto; }

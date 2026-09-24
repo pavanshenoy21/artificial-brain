@@ -34,3 +34,17 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - A vault that can't be opened doesn't crash the app: the error is shown in the empty state with "Open another folder".
 - Settings: secrets are sent to the UI as a `__saved__` marker and only replaced if the user types a new value.
 - `load_graph`/`graph.json` removed; `get_graph` returns `{ nodes, links, lobes }`.
+
+## Milestone 3: editor + links
+- Editor = CodeMirror 6 with the markdown language, no line numbers, line wrapping, styled only from theme.css variables. The editor holds the body; frontmatter is edited in the Properties pane, never as raw YAML.
+- Autosave 500ms after the last keystroke, serialised through one promise chain so saves never overlap. An external change (watcher reload) replaces the editor text only when there's no unsaved typing.
+- `[[` autocomplete inserts `[[Title]]`, or `[[file name|Title]]` when the file name had to drop characters, so the link also resolves in Obsidian.
+- Ctrl/Cmd+click (or Ctrl Enter) on a link follows it; following a link to a missing item creates that note, like Obsidian.
+- Title is an input above the editor; the rename is committed on Enter/blur (not per keystroke), because it renames the file and rewrites links everywhere.
+- Reading/edit mode is remembered as the default for newly opened tabs.
+- Properties pane edits type, lobe, tags (chips + existing-tag suggestions) and type fields; list fields (stack, languages, topics, used_in) are comma-separated. A pane doesn't re-render while one of its inputs has focus.
+- Backlinks show the line that contains the link, like Obsidian's backlinks pane.
+- Inbox is its own left-sidebar view (untagged items, newest first) with a count badge; the Tags view lists only real tags.
+- Delete is a two-step button (trash, then "Confirm" for 3s) instead of a modal; files go to `.trash/`.
+- Sample skill levels lowercased to match the data model (beginner|intermediate|advanced).
+- Vite chunk-size warning raised to 3 MB: the single bundle loads from disk inside the desktop app.
