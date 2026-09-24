@@ -14,6 +14,9 @@ const FALLBACK_LOBE = { id: "?", name: "Unsorted", color: "#9aa3b5", center: [0,
 const lobeOf = n => LOBE[n.lobe] || FALLBACK_LOBE;
 
 // ------------------------------------------------------------------ data
+function loadViewMode() {
+  try { return localStorage.getItem("brain.view"); } catch { return null; }
+}
 async function loadGraph() {
   // Inside the desktop app, ask the Rust side for the user's graph.json first.
   if (window.__TAURI_INTERNALS__) {
@@ -27,6 +30,18 @@ async function loadGraph() {
   }
   return buildSampleGraph();
 }
+
+// ------------------------------------------------------------------ state
+const state = {
+  focus: null,          // { kind: "node", node } | { kind: "lobe", lobe }
+  levels: new Map(),    // node id -> 0 focus, 1 neighbour, 2 second ring, 3 background
+  hover: null,
+  types: new Set(TYPES.map(t => t.id)),
+  showSimilar: true,
+  orbit: true,
+  flat: loadViewMode() === "2d", // 2D view: same graph squashed onto z = 0, seen top-down
+};
+const level = n => (state.focus ? state.levels.get(idOf(n)) ?? 3 : 0);
 
 const data = await loadGraph();
 const byId = new Map(data.nodes.map(n => [n.id, n]));
@@ -42,19 +57,8 @@ for (const n of data.nodes) {
   const c = lobeOf(n).center;
   n.x = c[0] + (Math.random() - 0.5) * 30;
   n.y = c[1] + (Math.random() - 0.5) * 30;
-  n.z = c[2] + (Math.random() - 0.5) * 30;
+  n.z = state.flat ? 0 : c[2] + (Math.random() - 0.5) * 30;
 }
-
-// ------------------------------------------------------------------ state
-const state = {
-  focus: null,          // { kind: "node", node } | { kind: "lobe", lobe }
-  levels: new Map(),    // node id -> 0 focus, 1 neighbour, 2 second ring, 3 background
-  hover: null,
-  types: new Set(TYPES.map(t => t.id)),
-  showSimilar: true,
-  orbit: true,
-};
-const level = n => (state.focus ? state.levels.get(idOf(n)) ?? 3 : 0);
 
 // ------------------------------------------------------------------ node objects
 function makeNode(n) {
@@ -150,7 +154,8 @@ function lobeForce(strength) {
       const c = lobeOf(n).center;
       n.vx += (c[0] - n.x) * strength * alpha;
       n.vy += (c[1] - n.y) * strength * alpha;
-      n.vz += (c[2] - n.z) * strength * alpha;
+      if (state.flat) n.vz -= n.z * 0.2; // not scaled by alpha: keeps pulling until everything is flat
+      else n.vz += (c[2] - n.z) * strength * alpha;
     }
   };
   f.initialize = ns => { nodes = ns; };
@@ -274,6 +279,11 @@ function focusLobe(lobe) {
   applyFocusVisuals();
   pauseOrbit();
   panel.close();
+  if (state.flat) {
+    const c = fx.center.clone().setZ(0);
+    Graph.cameraPosition(c.clone().setZ(fx.radius * 3.2), c, reduceMotion() ? 0 : 1100);
+    return;
+  }
   const out = fx.center.clone().normalize();
   if (out.lengthSq() === 0) out.set(0, 0, 1);
   const pos = fx.center.clone().add(out.multiplyScalar(fx.radius * 3.2)).add(new THREE.Vector3(0, 20, 0));
@@ -293,12 +303,12 @@ const controls = Graph.controls();
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.autoRotateSpeed = 0.35;
-controls.autoRotate = state.orbit;
+controls.autoRotate = state.orbit && !state.flat;
 let idleTimer;
 function pauseOrbit() { controls.autoRotate = false; clearTimeout(idleTimer); }
 function resumeOrbitSoon(ms = 9000) {
   clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => { if (state.orbit && !state.focus && !search.isOpen) controls.autoRotate = true; }, ms);
+  idleTimer = setTimeout(() => { if (state.orbit && !state.flat && !state.focus && !search.isOpen) controls.autoRotate = true; }, ms);
 }
 el.addEventListener("pointerdown", () => { pauseOrbit(); resumeOrbitSoon(); });
 el.addEventListener("wheel", () => { pauseOrbit(); resumeOrbitSoon(); }, { passive: true });
@@ -427,8 +437,53 @@ document.getElementById("t-similar").addEventListener("change", e => {
 });
 document.getElementById("t-rotate").addEventListener("change", e => {
   state.orbit = e.target.checked;
-  controls.autoRotate = state.orbit && !state.focus;
+  controls.autoRotate = state.orbit && !state.flat && !state.focus;
 });
+
+// ------------------------------------------------------------------ 2D / 3D view
+// 2D reuses the 3D scene: a force flattens every node onto z = 0 and the camera
+// locks top-down (drag pans instead of rotating). Focus, search and travel keep working.
+function applyControlsMode() {
+  controls.enableRotate = !state.flat;
+  controls.mouseButtons.LEFT = state.flat ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+  controls.touches.ONE = state.flat ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE;
+  document.getElementById("rotate-switch").classList.toggle("disabled", state.flat);
+  document.getElementById("hint-drag").textContent = state.flat ? "drag to pan" : "drag to rotate";
+  for (const b of document.querySelectorAll("#view-mode [data-mode]"))
+    b.classList.toggle("on", (b.dataset.mode === "2d") === state.flat);
+}
+
+function setViewMode(flat) {
+  if (flat === state.flat) return;
+  state.flat = flat;
+  try { localStorage.setItem("brain.view", flat ? "2d" : "3d"); } catch {}
+  const instant = reduceMotion();
+  for (const n of data.nodes) {
+    if (flat && instant) { n.z = 0; n.vz = 0; }
+    // un-flattening: a little z jitter so charge can push nodes apart in depth again
+    if (!flat) n.z += (Math.random() - 0.5) * 20;
+  }
+  Graph.d3ReheatSimulation();
+  pauseOrbit();
+  applyControlsMode();
+
+  const t = controls.target.clone();
+  const dist = Math.max(120, Graph.camera().position.distanceTo(t));
+  if (flat) {
+    t.z = 0;
+    Graph.cameraPosition(t.clone().setZ(dist), t, instant ? 0 : 1000);
+  } else {
+    const pos = t.clone().add(new THREE.Vector3(0.35, 0.3, 1).normalize().multiplyScalar(dist));
+    Graph.cameraPosition(pos, t, instant ? 0 : 1000);
+    if (!state.focus) resumeOrbitSoon();
+  }
+}
+
+document.getElementById("view-mode").addEventListener("click", e => {
+  const b = e.target.closest("[data-mode]");
+  if (b) setViewMode(b.dataset.mode === "2d");
+});
+applyControlsMode();
 
 const explicitCount = data.links.filter(l => l.kind === "explicit").length;
 document.getElementById("stats").textContent =
@@ -441,6 +496,8 @@ window.addEventListener("keydown", e => {
   if ((e.key === "k" && (e.ctrlKey || e.metaKey)) || (e.key === "/" && !typing)) {
     e.preventDefault();
     search.isOpen ? search.close() : search.open();
+  } else if ((e.key === "v" || e.key === "V") && !typing && !search.isOpen && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    setViewMode(!state.flat);
   } else if (e.key === "Escape" && !search.isOpen) {
     if (state.focus || panel.current) clearFocus();
   }
@@ -449,7 +506,7 @@ window.addEventListener("keydown", e => {
 function resize() { Graph.width(window.innerWidth).height(window.innerHeight); }
 window.addEventListener("resize", resize);
 resize();
-Graph.cameraPosition({ x: 0, y: 40, z: 540 });
+Graph.cameraPosition(state.flat ? { x: 0, y: 0, z: 540 } : { x: 0, y: 40, z: 540 }, { x: 0, y: 0, z: 0 });
 
 // handy for poking around in devtools
-window.brain = { Graph, data, focusNode, focusLobe, clearFocus, openFromSearch, search };
+window.brain = { Graph, data, focusNode, focusLobe, clearFocus, openFromSearch, search, setViewMode };

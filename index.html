@@ -25,8 +25,12 @@
         <kbd>Ctrl K</kbd>
       </button>
       <div class="toggles">
+        <div class="seg" id="view-mode" role="group" aria-label="View" title="Switch view (V)">
+          <button type="button" data-mode="2d">2D</button>
+          <button type="button" data-mode="3d">3D</button>
+        </div>
         <label class="switch"><input type="checkbox" id="t-similar" checked /><span></span>Similar links</label>
-        <label class="switch"><input type="checkbox" id="t-rotate" checked /><span></span>Idle orbit</label>
+        <label class="switch" id="rotate-switch"><input type="checkbox" id="t-rotate" checked /><span></span>Idle orbit</label>
       </div>
     </header>
 
@@ -48,7 +52,7 @@
       <button type="button" id="focus-clear">Esc · show all</button>
     </div>
 
-    <div class="hint">drag to rotate · scroll to zoom · click a node to focus · <kbd>/</kbd> search</div>
+    <div class="hint"><span id="hint-drag">drag to rotate</span> · scroll to zoom · click a node to focus · <kbd>/</kbd> search · <kbd>V</kbd> 2D/3D</div>
 
     <!-- detail panel: outer box keeps its layout so the travel animation can measure it -->
     <section class="panel" id="panel" aria-hidden="true">

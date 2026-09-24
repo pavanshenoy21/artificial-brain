@@ -78,6 +78,16 @@ kbd {
 .switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #cfd6e6; transition: transform .2s; }
 .switch input:checked + span { background: rgba(138,180,255,.55); }
 .switch input:checked + span::after { transform: translateX(12px); }
+.switch.disabled { opacity: .35; pointer-events: none; }
+
+.toggles { align-items: center; }
+.seg { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 9px; background: var(--glass); }
+.seg button {
+  padding: 3px 10px; border: 0; border-radius: 7px; background: none;
+  color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; transition: background .2s, color .2s;
+}
+.seg button:hover { color: var(--text); }
+.seg button.on { background: rgba(138,180,255,.55); color: var(--text); }
 
 /* ---------- legend ---------- */
 .legend { position: fixed; left: 16px; bottom: 16px; width: 230px; padding: 12px; z-index: 5; }
