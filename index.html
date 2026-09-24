@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Artificial Brain</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="graph"></div>
+
+    <!-- top bar -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <div class="brand-name">Artificial Brain</div>
+          <div class="brand-stats" id="stats">—</div>
+        </div>
+        <span class="chip chip-sample" id="sample-chip" hidden>sample data</span>
+      </div>
+      <button class="search-trigger" id="search-open" type="button">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.8"/><path d="m10.6 10.6 3.4 3.4"/></svg>
+        <span>Search your brain</span>
+        <kbd>Ctrl K</kbd>
+      </button>
+      <div class="toggles">
+        <label class="switch"><input type="checkbox" id="t-similar" checked /><span></span>Similar links</label>
+        <label class="switch"><input type="checkbox" id="t-rotate" checked /><span></span>Idle orbit</label>
+      </div>
+    </header>
+
+    <!-- legend / filters -->
+    <aside class="legend glass">
+      <div class="legend-title">Types</div>
+      <div id="type-list" class="legend-list"></div>
+      <div class="legend-title">Lobes</div>
+      <div id="lobe-list" class="legend-list"></div>
+      <div class="legend-key">
+        <span><i class="line solid"></i>your links</span>
+        <span><i class="line faint"></i>similar</span>
+      </div>
+    </aside>
+
+    <!-- focus breadcrumb -->
+    <div class="focus-bar glass" id="focus-bar" hidden>
+      <span id="focus-label"></span>
+      <button type="button" id="focus-clear">Esc · show all</button>
+    </div>
+
+    <div class="hint">drag to rotate · scroll to zoom · click a node to focus · <kbd>/</kbd> search</div>
+
+    <!-- detail panel: outer box keeps its layout so the travel animation can measure it -->
+    <section class="panel" id="panel" aria-hidden="true">
+      <div class="panel-inner glass" id="panel-inner"></div>
+    </section>
+
+    <!-- search palette -->
+    <div class="palette-backdrop" id="palette" hidden>
+      <div class="palette glass" role="dialog" aria-label="Search">
+        <div class="palette-input">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.8"/><path d="m10.6 10.6 3.4 3.4"/></svg>
+          <input id="palette-input" placeholder="Search notes, links, skills, projects…" autocomplete="off" spellcheck="false" />
+          <kbd>Esc</kbd>
+        </div>
+        <ul id="palette-results" class="palette-results"></ul>
+        <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span></div>
+      </div>
+    </div>
+
+    <!-- layer for the travel animation -->
+    <div id="fx-layer" class="fx-layer"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
