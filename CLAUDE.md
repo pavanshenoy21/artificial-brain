@@ -183,19 +183,22 @@ Esc clear focus / close palette.
 - Don't commit secrets, `node_modules`, `dist` or `target`.
 
 ## Current state
-- Milestones 1–9 done (see git log). Next: milestone 10 (wrap-up).
-- Rust (`src-tauri/src/`): `vault.rs` (files, frontmatter, lobes.json, trash), `index.rs` (SQLite: items, tags,
-  links, items_fts, embeddings, meta), `store.rs` (service: sync, CRUD, rename rewriting, import, rebuild),
+- All 10 milestones are built (see git log, one commit per milestone). `README.md` has setup, features and
+  shortcuts; `DECISIONS.md` logs every call made along the way; `TODO-PAVVY.md` lists what needs Pavvy.
+- Rust (`src-tauri/src/`): `vault.rs` (files, frontmatter, lobes.json, trash, history), `index.rs` (SQLite: items,
+  tags, links, items_fts, embeddings, meta), `store.rs` (sync, CRUD, rename rewriting, import, rebuild),
   `markdown.rs` (frontmatter + wikilinks), `settings.rs` (settings.json, 0600, secrets redacted for the UI),
-  `watch.rs` (notify watcher → sync → `vault-changed`), `capture.rs` (capture window, link fetch/extract pipeline),
-  `enrich.rs` (post-save hooks: summary, embedding, suggestions), `ai.rs` (OpenAI-compatible chat + embeddings client),
-  `embed.rs` (vectors, background worker, similar links, semantic search), `github.rs` (repo sync), `assist.rs` (Polish/Summarize/Fill form/suggestions), `ask.rs` (RAG answers),
-  `commands.rs`, `state.rs`, `error.rs`,
-  `tests_integration.rs` (mock-runtime tests with a loopback fake server).
-- Frontend: `main.js` (bootstrap, keys), `capture.html` + `capture.js` (quick-capture window), `state.js` (shared state + events), `api.js` (+ `mock/backend.js`),
-  `actions.js` (new item, import, rebuild…), `shell/` (layout, tabs, statusbar, toast, empty state),
-  `graph/view.js`, `sidebar/` (left: files/tags/filters, right: item), `palette/` (generic palette, search, commands registry), `core-commands.js`,
-  `editor/` (item tab: title, CodeMirror editor `editor.js`, reading view `markdown.js`), `lib/` (types, lobes, wikilinks, prefs, rank), `settings/view.js` (Settings tab), `forms/` (field controls, New … dialog), `ai/` (actions, review diff dialog, Ask pane), `shell/menu.js` (context menu), `theme.css` + `app.css`.
+  `watch.rs` (notify watcher), `capture.rs` (capture window, link fetch/extract pipeline), `enrich.rs` (post-save
+  hooks), `ai.rs` (OpenAI-compatible client), `embed.rs` (vectors, worker, similar links, semantic search),
+  `assist.rs` (Polish/Summarize/Fill form/suggestions), `ask.rs` (RAG answers), `github.rs` (repo sync),
+  `commands.rs`, `state.rs`, `error.rs`, `tests_integration.rs` (mock runtime + loopback fake servers).
+- Frontend (`src/`): `main.js` (bootstrap, keys), `state.js` (shared state + events), `api.js` (+ `mock/backend.js`),
+  `actions.js`, `core-commands.js`, `shell/` (layout, tabs, statusbar, toast, empty state, menu), `graph/view.js`,
+  `sidebar/` (left: files/tags/inbox/filters, right: item), `editor/` (item tab, CodeMirror, markdown-it),
+  `palette/` (palette, search, commands), `forms/` (field controls, New … dialog), `ai/` (actions, review dialog,
+  Ask pane), `settings/view.js`, `lib/` (types + forms, lobes, wikilinks, prefs, rank), `capture.html` + `capture.js`,
+  `theme.css` + `app.css`.
 - Run: `npm install && npm run tauri dev` (browser only: `npm run dev`, port 1420; `?empty` = empty mock vault).
-  Tests: `npm test` (frontend, node --test) and `cd src-tauri && cargo test`.
-- See `DECISIONS.md` and `TODO-PAVVY.md`.
+- Checks: `npm test`, `npm run build`, `cd src-tauri && cargo test && cargo clippy --all-targets` (all clean).
+- Cloud sessions CAN run the real desktop build headless: install `xvfb xdotool imagemagick dbus-x11`, then
+  `npx tauri build --no-bundle && scripts/desktop-smoke.sh <out-dir>` (screenshots of the real window).

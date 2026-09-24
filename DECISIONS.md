@@ -109,3 +109,9 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - Without an AI provider, Ask still works as a search: it lists the matching notes (and says AI is off) instead of failing.
 - Sources are listed under each answer (cited ones in the accent colour, neighbours marked "linked"); the cited notes (or the matches, if nothing was cited) light up in the graph as a focus set, and the camera flies to their centre.
 - `ask::answer` is generic over the Tauri runtime so the full pipeline is tested with the mock runtime and a loopback fake chat server.
+
+## Milestone 10: wrap-up
+- `npx tauri build` works in the cloud container: release binary plus `.rpm` and `.deb` (7 MB). The installed binary is `/usr/bin/brain`, which is what the GNOME `brain --capture` shortcut uses. AppImage wasn't built (it downloads linuxdeploy).
+- The real desktop build was exercised under Xvfb with xdotool (first-run screen, sample import, watcher picking up an outside file, `brain --capture` from a second process, editor autosave to disk, Ctrl K backed by FTS). `scripts/desktop-smoke.sh` keeps that repeatable.
+- A file without `id:` gets its original path written as its id the first time the app edits it, so the id stays stable across later renames (nothing is rewritten before the user edits the file).
+- README rewritten for setup (Fedora deps), features, AI/GitHub setup, keyboard, vault format and development.

@@ -132,7 +132,7 @@ pub async fn answer<R: tauri::Runtime>(app: &AppHandle<R>, question: String, his
     let mut retrieval = "full-text".to_string();
     let mut ranked: Vec<String> = Vec::new();
     if settings.embed.enabled() {
-        if let Ok(v) = ai::embed(&settings.embed, &[q.clone()]).await {
+        if let Ok(v) = ai::embed(&settings.embed, std::slice::from_ref(&q)).await {
             let qv = embed::normalize(v.into_iter().next().unwrap_or_default());
             let vecs = state.with_store(|s| s.index.embeddings(&settings.embed.key())).unwrap_or_default();
             ranked = embed::rank(&qv, &vecs, TOP_K).into_iter().filter(|(_, s)| *s > 0.2).map(|(id, _)| id).collect();
