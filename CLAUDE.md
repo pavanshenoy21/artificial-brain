@@ -183,12 +183,13 @@ Esc clear focus / close palette.
 - Don't commit secrets, `node_modules`, `dist` or `target`.
 
 ## Current state
-- Milestones 1–4 done (see git log). Next: milestone 5 (quick capture).
+- Milestones 1–5 done (see git log). Next: milestone 6 (settings + AI layer).
 - Rust (`src-tauri/src/`): `vault.rs` (files, frontmatter, lobes.json, trash), `index.rs` (SQLite: items, tags,
   links, items_fts, embeddings, meta), `store.rs` (service: sync, CRUD, rename rewriting, import, rebuild),
   `markdown.rs` (frontmatter + wikilinks), `settings.rs` (settings.json, 0600, secrets redacted for the UI),
-  `watch.rs` (notify watcher → sync → `vault-changed`), `commands.rs`, `state.rs`, `error.rs`.
-- Frontend: `main.js` (bootstrap, keys), `state.js` (shared state + events), `api.js` (+ `mock/backend.js`),
+  `watch.rs` (notify watcher → sync → `vault-changed`), `capture.rs` (capture window, link fetch/extract pipeline),
+  `enrich.rs` (post-save hooks: summary, embedding, suggestions), `commands.rs`, `state.rs`, `error.rs`.
+- Frontend: `main.js` (bootstrap, keys), `capture.html` + `capture.js` (quick-capture window), `state.js` (shared state + events), `api.js` (+ `mock/backend.js`),
   `actions.js` (new item, import, rebuild…), `shell/` (layout, tabs, statusbar, toast, empty state),
   `graph/view.js`, `sidebar/` (left: files/tags/filters, right: item), `palette/` (generic palette, search, commands registry), `core-commands.js`,
   `editor/` (item tab: title, CodeMirror editor `editor.js`, reading view `markdown.js`), `lib/` (types, lobes, wikilinks, prefs), `theme.css` + `app.css`.

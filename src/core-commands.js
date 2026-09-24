@@ -3,7 +3,7 @@
 
 import { registerCommand as reg } from "./palette/commands.js";
 import { app } from "./state.js";
-import { isDesktop } from "./api.js";
+import { api, isDesktop } from "./api.js";
 import { newItem, importSample, openVaultFolder, rebuildIndex, deleteItem } from "./actions.js";
 import { TYPES } from "./lib/types.js";
 import { toast } from "./shell/toast.js";
@@ -15,6 +15,7 @@ export function registerCoreCommands({ graph, tabs, left, right, search, setThem
   for (const t of TYPES)
     reg({ id: `new-${t.id}`, title: `New ${t.one.toLowerCase()}`, iconName: "plus", keys: t.id === "note" ? "Ctrl N" : undefined, run: () => newItem(t.id) });
 
+  reg({ id: "capture", title: "Quick capture", iconName: "capture", keys: "Ctrl Shift Space", run: () => api.openCapture() });
   reg({ id: "search", title: "Search", iconName: "search", keys: "Ctrl K", run: search });
   reg({ id: "graph", title: "Show graph", iconName: "graph", keys: "Ctrl G", run: () => tabs.activate("graph") });
   reg({ id: "toggle-view", title: "Toggle 2D / 3D graph", iconName: "graph", keys: "V", run: () => { tabs.activate("graph"); graph.toggleView(); } });

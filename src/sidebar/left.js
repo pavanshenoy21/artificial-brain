@@ -8,6 +8,12 @@ import { UNSORTED } from "../lib/lobes.js";
 import { esc } from "../util.js";
 import { prefs } from "../lib/prefs.js";
 
+// Links being fetched / that failed show it in the list.
+const linkState = n =>
+  n.type !== "link" || !n.status || n.status === "ok" ? ""
+    : n.status === "pending" ? `<span class="row-state">fetching</span>`
+    : `<span class="row-state failed" title="${esc(n.error || "")}">failed</span>`;
+
 export function initLeftSidebar({ graph }) {
   // ---------------------------------------------------------------- files
   const files = left.add({ id: "files", title: "Files", iconName: "files" });
@@ -18,7 +24,7 @@ export function initLeftSidebar({ graph }) {
 
   function row(n) {
     return `<div class="row item-row ${n.id === app.selected ? "on" : ""}" data-id="${esc(n.id)}" role="treeitem" tabindex="-1" title="${esc(n.path || n.title)}">
-      <span class="dot" style="background:${app.lobeOf(n).color}"></span><span class="row-title">${esc(n.title)}</span></div>`;
+      <span class="dot" style="background:${app.lobeOf(n).color}"></span><span class="row-title">${esc(n.title)}</span>${linkState(n)}</div>`;
   }
 
   function renderFiles() {

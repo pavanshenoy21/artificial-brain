@@ -1,4 +1,6 @@
+mod capture;
 mod commands;
+mod enrich;
 mod error;
 mod index;
 mod markdown;
@@ -11,6 +13,7 @@ mod watch;
 use std::sync::Mutex;
 
 use tauri::Manager;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use settings::Settings;
 use state::AppState;
@@ -18,6 +21,16 @@ use state::AppState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be first: a second `brain` process hands its args over and exits.
+        // `brain --capture` (bound to a GNOME shortcut) opens the capture window.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if argv.iter().any(|a| a == "--capture") {
+                let _ = capture::show_window(app);
+            } else if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -33,7 +46,28 @@ pub fn run() {
                 open_error: Mutex::new(None),
             };
             commands::open_store(app.handle(), &state);
+            let shortcut = state.settings().shortcuts.capture;
             app.manage(state);
+
+            // Global shortcut for quick capture. Often unavailable on GNOME
+            // Wayland: then `brain --capture` is the way (see TODO-PAVVY.md).
+            app.handle().plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .with_handler(|app, _shortcut, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            let _ = capture::show_window(app);
+                        }
+                    })
+                    .build(),
+            )?;
+            if !shortcut.trim().is_empty() {
+                if let Err(e) = app.global_shortcut().register(shortcut.as_str()) {
+                    eprintln!("global shortcut {shortcut} unavailable: {e}");
+                }
+            }
+            if std::env::args().any(|a| a == "--capture") {
+                let _ = capture::show_window(app.handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -52,6 +86,10 @@ pub fn run() {
             commands::open_vault,
             commands::get_settings,
             commands::save_settings,
+            capture::capture,
+            capture::refetch_link,
+            capture::open_capture,
+            capture::hide_capture,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

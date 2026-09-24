@@ -10,6 +10,21 @@ const MANAGED = new Set(["id", "path", "created", "updated", "degree"]);
 const CORE = new Set(["id", "type", "lobe", "title", "tags", "body", "path", "created", "updated"]);
 const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+export function normalizeUrl(text) {
+  if (/\s/.test(text)) return null;
+  let c = text;
+  if (!/^https?:\/\//.test(c)) {
+    if (!c.includes(".") || c.startsWith(".") || c.includes("://")) return null;
+    c = "https://" + c;
+  }
+  try {
+    const u = new URL(c);
+    return u.hostname.includes(".") || u.hostname === "localhost" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
 // Mirrors settings.rs defaults.
 export const DEFAULT_SETTINGS = {
   vault: "", theme: "dark",
@@ -194,6 +209,36 @@ export function createMockBackend({ seed = true } = {}) {
     async pickFolder() {
       return null;
     },
+    // Mirrors capture.rs, minus the network: the "fetch" finishes after a moment
+    // with the host as title (pages aren't fetched in the browser preview).
+    async capture(text) {
+      text = text.trim();
+      if (!text) throw new Error("nothing to save");
+      const url = normalizeUrl(text);
+      if (!url) {
+        const [first, ...rest] = text.split("\n");
+        return { item: await api.createItem({ type: "note", title: first.trim().slice(0, 80), body: rest.join("\n").trim() }), existing: false };
+      }
+      const dup = [...items.values()].find(i => i.url === url);
+      if (dup) return { item: clone(dup), existing: true };
+      const host = new URL(url).hostname.replace(/^www\./, "");
+      const item = await api.createItem({ type: "link", title: (host + new URL(url).pathname).replace(/\/$/, ""), url, site: host, status: "pending" });
+      setTimeout(() => {
+        const it = items.get(item.id);
+        if (!it) return;
+        Object.assign(it, { status: "ok", fetched: now(), summary: "Browser preview: pages aren't fetched here." });
+        emit("items");
+      }, 800);
+      return { item, existing: false };
+    },
+    async refetchLink(id) {
+      const it = items.get(id);
+      if (it) { it.status = "ok"; delete it.error; emit("items"); }
+    },
+    async openCapture() {
+      window.open("/capture.html", "capture", "width=480,height=120");
+    },
+    async hideCapture() {},
     async getSettings() {
       return clone(settings);
     },

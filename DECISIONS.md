@@ -55,3 +55,14 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - Semantic blending is a pluggable hook (`setSemanticSearch`) + `lib/rank.js#blend`: keyword scores normalised to the best hit, weighted 0.55 keyword / 0.45 semantic; semantic-only hits need ≥ 0.35 similarity.
 - Commands: a registry (`registerCommand`) with optional `when` (hide) and `disabled` (shown greyed with a reason). Subsequence fuzzy match with word-start bonus; recently used commands float up.
 - Frontend unit tests: `npm test` runs `node --test` on the DOM-free modules (wikilinks, ranking, lobe layout, mock backend). The mock waits for its seed on every call (a test caught search racing the seed).
+
+## Milestone 5: quick capture
+- The capture window is created on first use (not at startup) from `capture.html`, a second Vite page: 480×120, undecorated, always on top, skip taskbar. Enter saves, Esc hides it (hidden, not destroyed, so it reopens instantly).
+- Global shortcut from `settings.shortcuts.capture` (default Ctrl+Shift+Space); failure to register is logged, not fatal. `tauri-plugin-single-instance` forwards `brain --capture` from a second process, which is the Wayland route.
+- Text that isn't a URL is saved as a note (first line = title) and lands in the Inbox; it's quicker than rejecting it.
+- Capturing a URL that's already saved doesn't create a duplicate ("Already saved").
+- The link item is written immediately with `status: pending` and a host/path placeholder title; the pipeline then runs in the background (`tauri::async_runtime::spawn`). The fetched title replaces the placeholder only if the user hasn't renamed it meanwhile. On failure the item keeps its URL/title with `status: failed` and `error:`, and the sidebar has a refetch button.
+- Fetch: reqwest (rustls, 20s timeout, 4 MB cap, HTML/text only). Extraction: `scraper`; title from og:title → <title> → <h1>; text from article → main → body, skipping nav/header/footer/aside/script/form and short fragments.
+- Summary without AI = the page's meta description, else its first two sentences. `enrich.rs` is the hook for AI summary, embedding and suggestions (milestones 6 and 8).
+- The fetched page text is not written into the vault (the body stays the user's); it's only used for the summary and the embedding.
+- In the browser preview the capture page has its own in-memory mock, and "fetching" is simulated.

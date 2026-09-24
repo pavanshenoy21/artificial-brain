@@ -32,6 +32,10 @@ function tauriBackend() {
       const { open } = await import("@tauri-apps/plugin-dialog");
       return open({ directory: true, title: "Choose a vault folder" });
     },
+    capture: text => call("capture", { text }),              // { item, existing }
+    refetchLink: id => call("refetch_link", { id }),
+    openCapture: () => call("open_capture"),
+    hideCapture: () => call("hide_capture"),
     getSettings: () => call("get_settings"),
     saveSettings: settings => call("save_settings", { settings }),
     onChange(fn) {

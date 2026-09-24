@@ -83,6 +83,7 @@ ribbonButton({ iconName: "search", title: "Search (Ctrl K)", onClick: search });
 ribbonButton({ iconName: "graph", title: "Graph (Ctrl G)", onClick: () => tabs.activate("graph") });
 ribbonButton({ iconName: "command", title: "Commands (Ctrl P)", onClick: openCommands });
 ribbonButton({ iconName: "plus", title: "New note (Ctrl N)", onClick: () => newItem("note") });
+ribbonButton({ iconName: "capture", title: "Quick capture (Ctrl Shift Space)", onClick: () => api.openCapture() });
 
 const themeBtn = ribbonButton({
   iconName: "sun", title: "Toggle theme", bottom: true,

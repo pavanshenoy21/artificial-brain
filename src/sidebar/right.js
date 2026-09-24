@@ -101,8 +101,11 @@ export function initRightSidebar() {
         <div class="item-kind">${typeIcon(n.type, lobe.color, 12)}<span>${esc(TYPE[n.type]?.one || n.type)}</span>
           <span class="sep">·</span><span class="dot" style="background:${lobe.color}"></span><span>${esc(lobe.name)}</span></div>
         <div class="item-title">${esc(n.title)}</div>
+        ${n.type === "link" && n.status && n.status !== "ok" ? `<div class="item-status ${n.status}">${n.status === "pending" ? "Fetching the page…" : `Fetch failed${n.error ? `: ${esc(n.error)}` : ""}`}</div>` : ""}
         <div class="item-actions">
           <button type="button" class="btn" data-act="open">${icon("file", { size: 14 })}Open</button>
+          ${n.url ? `<button type="button" class="btn" data-act="url" title="Open in browser">${icon("external", { size: 14 })}Visit</button>` : ""}
+          ${n.type === "link" && n.url ? `<button type="button" class="btn quiet" data-act="refetch" title="Fetch the page again">${icon("refresh", { size: 14 })}</button>` : ""}
           <span class="fill"></span>
           <button type="button" class="btn ${confirmDelete ? "danger" : "quiet"}" data-act="delete" title="Move to .trash">${icon("trash", { size: 14 })}${confirmDelete ? "Confirm" : ""}</button>
         </div>
@@ -142,6 +145,7 @@ export function initRightSidebar() {
     if (!n) return;
     if (act === "open") app.open(n.id);
     else if (act === "url") openExternal(n.url);
+    else if (act === "refetch") api.refetchLink(n.id).then(() => app.reload()).catch(e => toast(`Couldn't refetch: ${e}`, "error"));
     else if (act === "delete") {
       if (!confirmDelete) {
         confirmDelete = true;
