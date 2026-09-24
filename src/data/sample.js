@@ -1,7 +1,9 @@
-// Sample brain used until real storage exists.
-// Shape of the data is the same one the app will load from graph.json:
+// Sample brain shown while the vault is empty (and importable into it).
+// Same shape the Rust store returns from load_graph:
 //   { nodes: [{ id, type, lobe, title, tags, ...fields }], links: [{ source, target, kind }] }
 // kind: "explicit" = a link you made yourself, "similar" = computed by shared tags / embeddings.
+
+import { similarityLinks } from "./similar.js";
 
 export const LOBES = [
   { id: "sec", name: "Security & CTF",          color: "#ff4d8d", center: [-115, 38, 45] },
@@ -130,32 +132,11 @@ const E = [
   [hackNight, club],
 ];
 
-// ---------- Similarity links (stand-in for embedding similarity: shared tags) ----------
-function similarityLinks(existing) {
-  const has = new Set(existing.map(([a, b]) => [a, b].sort().join("|")));
-  const out = [];
-  for (const a of nodes) {
-    const scored = nodes
-      .filter(b => b !== a)
-      .map(b => ({ b, s: b.tags.filter(t => a.tags.includes(t)).length }))
-      .filter(x => x.s > 0)
-      .sort((x, y) => y.s - x.s || x.b.id.localeCompare(y.b.id))
-      .slice(0, 2);
-    for (const { b } of scored) {
-      const key = [a.id, b.id].sort().join("|");
-      if (has.has(key)) continue;
-      has.add(key);
-      out.push({ source: a.id, target: b.id, kind: "similar" });
-    }
-  }
-  return out;
-}
-
 export function buildSampleGraph() {
   const links = E.map(([source, target]) => ({ source, target, kind: "explicit" }));
   return {
     nodes: nodes.map(x => ({ ...x })),
-    links: [...links, ...similarityLinks(E)],
+    links: [...links, ...similarityLinks(nodes, links)],
     sample: true,
   };
 }

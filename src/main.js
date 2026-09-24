@@ -2,25 +2,30 @@ import ForceGraph3D from "3d-force-graph";
 import * as THREE from "three";
 import SpriteText from "three-spritetext";
 import { LOBES, TYPES, buildSampleGraph } from "./data/sample.js";
+import { similarityLinks } from "./data/similar.js";
+import * as store from "./store.js";
 import { GEOMETRIES, BASE_SIZE, typeIcon, glowTexture } from "./shapes.js";
 import { createSearch } from "./search.js";
 import { createPanel } from "./panel.js";
 import { travel } from "./travel.js";
 import { esc, hexToRgb, idOf, reduceMotion } from "./util.js";
 
-const LOBE = Object.fromEntries(LOBES.map(l => [l.id, l]));
-const TYPE = Object.fromEntries(TYPES.map(t => [t.id, t]));
 const FALLBACK_LOBE = { id: "?", name: "Unsorted", color: "#9aa3b5", center: [0, 0, 0] };
+const LOBE = Object.fromEntries([...LOBES, FALLBACK_LOBE].map(l => [l.id, l]));
+const TYPE = Object.fromEntries(TYPES.map(t => [t.id, t]));
 const lobeOf = n => LOBE[n.lobe] || FALLBACK_LOBE;
 
 // ------------------------------------------------------------------ data
 async function loadGraph() {
-  // Inside the desktop app, ask the Rust side for the user's graph.json first.
-  if (window.__TAURI_INTERNALS__) {
+  // Inside the desktop app, read the markdown vault via the Rust store.
+  // Empty vault (first run) or plain browser → bundled sample data.
+  if (store.hasStore) {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const raw = await invoke("load_graph");
-      if (raw) return JSON.parse(raw);
+      const g = await store.loadGraph();
+      if (g.nodes.length) {
+        for (const n of g.nodes) if (!LOBE[n.lobe]) n.lobe = FALLBACK_LOBE.id;
+        return { nodes: g.nodes, links: [...g.links, ...similarityLinks(g.nodes, g.links)] };
+      }
     } catch (e) {
       console.warn("load_graph failed, falling back to sample data", e);
     }
@@ -433,7 +438,25 @@ document.getElementById("t-rotate").addEventListener("change", e => {
 const explicitCount = data.links.filter(l => l.kind === "explicit").length;
 document.getElementById("stats").textContent =
   `${data.nodes.length} nodes · ${explicitCount} links · ${data.links.length - explicitCount} similar`;
-document.getElementById("sample-chip").hidden = !data.sample;
+const sampleChip = document.getElementById("sample-chip");
+sampleChip.hidden = !data.sample;
+if (data.sample && store.hasStore) {
+  // First run: offer to turn the sample into real markdown files.
+  sampleChip.textContent = "sample data · import into vault";
+  sampleChip.title = "Write these nodes into your vault as markdown files";
+  sampleChip.classList.add("chip-action");
+  sampleChip.disabled = false;
+  sampleChip.addEventListener("click", async () => {
+    sampleChip.textContent = "importing…";
+    try {
+      await store.importGraph(buildSampleGraph());
+      location.reload();
+    } catch (e) {
+      console.error(e);
+      sampleChip.textContent = "import failed (see console)";
+    }
+  }, { once: true });
+}
 
 // ------------------------------------------------------------------ keyboard + resize
 window.addEventListener("keydown", e => {
@@ -452,4 +475,4 @@ resize();
 Graph.cameraPosition({ x: 0, y: 40, z: 540 });
 
 // handy for poking around in devtools
-window.brain = { Graph, data, focusNode, focusLobe, clearFocus, openFromSearch, search };
+window.brain = { Graph, data, focusNode, focusLobe, clearFocus, openFromSearch, search, store };

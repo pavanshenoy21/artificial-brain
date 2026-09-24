@@ -30,17 +30,26 @@ Node types:
   Fill form from messy text. Provider is configurable: local llama.cpp server or Groq (both OpenAI-compatible APIs).
 - This is SEPARATE from "Jarvis" (his local life-assistant project).
 
-## Current state (MVP = graph view only)
-- Runs on sample data in src/data/sample.js (placeholder repos/dates/statuses).
-- Rust command `load_graph` reads app-data-dir/graph.json if it exists (Linux: ~/.local/share/dev.pavvy.brain/).
-- Working: lobes + halos, per-type shapes, focus mode, semantic zoom labels, legend filters, fly to lobe,
+## Current state
+- Graph view: lobes + halos, per-type shapes, focus mode, semantic zoom labels, legend filters, fly to lobe,
   idle orbit, search palette + travel animation, detail panel. The Polish/Edit buttons are disabled placeholders.
-- Code map: src/main.js (graph, forces, focus, zoom, wiring), search.js, travel.js, panel.js,
-  shapes.js, src-tauri/src/lib.rs.
-- Run: `npm install && npm run tauri dev` (UI only in a browser: `npm run dev`, port 1420).
+- Storage (step 1, done): markdown vault is the source of truth, SQLite (`brain.db`) is a rebuildable index.
+  - Vault: `$BRAIN_VAULT` or app-data-dir/vault (Linux: ~/.local/share/dev.pavvy.brain/vault), index in
+    app-data-dir/brain.db. Layout: notes/, links/, skills/, hackathons/, projects/ as `<Title>.md`; deletes go to .trash/.
+  - File = YAML frontmatter (id, type, lobe, title only if the filename had to change, tags, type fields, created,
+    updated) + markdown body. [[Wikilinks]] (by filename, path or title) = explicit links. Hand-made/Obsidian files
+    work too (id falls back to path, type to folder). `load_graph` syncs by mtime+size before returning.
+  - Rust commands: load_graph, sync_vault, get_node, create_node, update_node (null removes a field; title change
+    renames the file and rewrites [[backlinks]]), delete_node, list_tags, import_graph, vault_path.
+    JS wrapper: src/store.js (also on `window.brain.store` for devtools).
+  - Empty vault -> sample data (src/data/sample.js) with an "import into vault" chip.
+  - "Similar" links are still shared-tag stand-ins (src/data/similar.js) until embeddings.
+- Code map: src/main.js (graph, forces, focus, zoom, wiring), search.js, travel.js, panel.js, shapes.js, store.js,
+  src-tauri/src/{lib.rs (commands), store.rs (vault + index), markdown.rs (frontmatter, wikilinks)}.
+- Run: `npm install && npm run tauri dev` (UI only in a browser: `npm run dev`, port 1420). Tests: `cd src-tauri && cargo test`.
 
 ## Next steps (agreed order)
-1. Storage: markdown + SQLite, Rust CRUD commands, replace sample data.
+1. ~~Storage: markdown + SQLite, Rust CRUD commands, replace sample data.~~ Done (no create/edit UI yet).
 2. Quick-capture window + global shortcut (tauri-plugin-global-shortcut).
 3. Embeddings (llama.cpp) → real similarity links + search blending.
 4. Forms for skills / hackathons / projects; GitHub sync.

@@ -58,8 +58,10 @@ kbd {
 @keyframes breathe { 50% { box-shadow: 0 0 28px rgba(76,201,240,.6); transform: scale(1.06); } }
 .brand-name { font-weight: 650; letter-spacing: .2px; }
 .brand-stats { color: var(--muted); font-size: 12px; }
-.chip { font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--muted); }
+.chip { font: inherit; font-size: 11px; background: none; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--muted); }
 .chip-sample { color: #ffb703; border-color: rgba(255,183,3,.35); }
+.chip-action { cursor: pointer; }
+.chip-action:hover { background: rgba(255,183,3,.1); }
 
 .search-trigger {
   display: flex; align-items: center; gap: 10px;

@@ -1,6 +1,9 @@
 import { esc, hexToRgb, openExternal } from "./util.js";
 import { typeIcon } from "./shapes.js";
 
+// [[Target|alias]] / [[Target#heading]] → readable text
+const unwiki = s => s.replace(/!?\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_, t, alias) => alias || t.split("#")[0]);
+
 function fields(n) {
   const rows = [];
   const add = (k, v) => v && (Array.isArray(v) ? v.length : true) && rows.push([k, Array.isArray(v) ? v.join(", ") : v]);
@@ -43,7 +46,7 @@ export function createPanel({ lobes, types, byId, adj, onSelect, onClose }) {
         <button class="p-close" type="button" aria-label="Close">×</button>
       </div>
       ${n.tags?.length ? `<div class="p-tags">${n.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join("")}</div>` : ""}
-      ${n.body ? `<div class="p-section"><p class="p-body">${esc(n.body)}</p></div>` : ""}
+      ${n.body ? `<div class="p-section"><p class="p-body">${esc(unwiki(n.body))}</p></div>` : ""}
       ${n.type === "link" ? `<div class="p-section">
           ${n.summary ? `<p class="p-body">${esc(n.summary)}</p>` : ""}
           <p style="margin:10px 0 0"><a class="p-link" href="${esc(n.url)}" data-ext>${esc(n.url)}</a></p></div>` : ""}
