@@ -11,7 +11,7 @@ use crate::settings::Settings;
 use crate::state::AppState;
 use crate::store::{Graph, Store, SyncReport};
 use crate::vault::{Item, Lobe};
-use crate::watch;
+use crate::{capture, embed, watch};
 
 type Cmd<T> = std::result::Result<T, String>;
 
@@ -24,11 +24,13 @@ fn changed(app: &AppHandle, kind: &str) {
 }
 
 #[tauri::command]
-pub async fn get_graph(state: State<'_, AppState>) -> Cmd<Graph> {
-    run(&state, |s| {
+pub async fn get_graph(app: AppHandle, state: State<'_, AppState>) -> Cmd<Graph> {
+    let mut g = run(&state, |s| {
         s.sync()?;
         s.graph()
-    })
+    })?;
+    g.similar = embed::graph_similar(&app, &g.links);
+    Ok(g)
 }
 
 #[tauri::command]
@@ -41,6 +43,7 @@ pub async fn get_item(state: State<'_, AppState>, id: String) -> Cmd<Option<Item
 pub async fn create_item(app: AppHandle, state: State<'_, AppState>, input: Map<String, Value>) -> Cmd<Item> {
     let item = run(&state, |s| s.create(input))?;
     changed(&app, "items");
+    embed::schedule(&app, vec![item.id.clone()]);
     Ok(item)
 }
 
@@ -49,6 +52,8 @@ pub async fn create_item(app: AppHandle, state: State<'_, AppState>, input: Map<
 pub async fn update_item(app: AppHandle, state: State<'_, AppState>, id: String, patch: Map<String, Value>) -> Cmd<Item> {
     let item = run(&state, |s| s.update(&id, patch))?;
     changed(&app, "items");
+    // a rename rewrites other files too; backfill catches everything stale
+    embed::backfill(&app);
     Ok(item)
 }
 
@@ -74,6 +79,7 @@ pub async fn search(state: State<'_, AppState>, query: String, limit: Option<usi
 pub async fn import_sample(app: AppHandle, state: State<'_, AppState>, nodes: Vec<Map<String, Value>>, links: Vec<Link>) -> Cmd<usize> {
     let n = run(&state, |s| s.import(nodes, links))?;
     changed(&app, "items");
+    embed::backfill(&app);
     Ok(n)
 }
 
@@ -81,6 +87,7 @@ pub async fn import_sample(app: AppHandle, state: State<'_, AppState>, nodes: Ve
 pub async fn rebuild_index(app: AppHandle, state: State<'_, AppState>) -> Cmd<SyncReport> {
     let r = run(&state, |s| s.rebuild())?;
     changed(&app, "items");
+    embed::backfill(&app);
     Ok(r)
 }
 
@@ -138,6 +145,13 @@ pub async fn save_settings(app: AppHandle, state: State<'_, AppState>, settings:
         open_store(&app, &state);
         changed(&app, "vault");
     }
+    if old.embed != new.embed {
+        embed::backfill(&app);
+        changed(&app, "similar");
+    }
+    if old.shortcuts.capture != new.shortcuts.capture {
+        capture::register_shortcut(&app, &old.shortcuts.capture, &new.shortcuts.capture);
+    }
     let _ = app.emit("settings-changed", new.redacted());
     Ok(new.redacted())
 }
@@ -163,4 +177,31 @@ pub fn open_store(app: &AppHandle, state: &AppState) {
     if let Ok(mut w) = state.watcher.lock() {
         *w = watch::start(app, &dir);
     }
+}
+
+#[derive(Serialize)]
+pub struct TestResult {
+    ok: bool,
+    message: String,
+}
+
+/// Tries the (possibly unsaved) AI settings with a tiny request.
+#[tauri::command]
+pub async fn test_ai(state: State<'_, AppState>, settings: Settings) -> Cmd<TestResult> {
+    let s = state.settings().merged(settings);
+    let r = crate::ai::chat(&s.ai, &[("user", "Reply with the single word: ok")], crate::ai::ChatOpts { max_tokens: 5, temperature: 0.0 }).await;
+    Ok(match r {
+        Ok(answer) => TestResult { ok: true, message: format!("Connected. The model replied: {}", answer.chars().take(40).collect::<String>()) },
+        Err(e) => TestResult { ok: false, message: e.to_string() },
+    })
+}
+
+#[tauri::command]
+pub async fn test_embed(state: State<'_, AppState>, settings: Settings) -> Cmd<TestResult> {
+    let s = state.settings().merged(settings);
+    let r = crate::ai::embed(&s.embed, &["test".to_string()]).await;
+    Ok(match r {
+        Ok(v) => TestResult { ok: true, message: format!("Connected. Vectors have {} dimensions.", v.first().map(Vec::len).unwrap_or(0)) },
+        Err(e) => TestResult { ok: false, message: e.to_string() },
+    })
 }

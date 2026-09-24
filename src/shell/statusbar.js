@@ -3,13 +3,13 @@ import { app } from "../state.js";
 import { esc } from "../util.js";
 
 const el = document.getElementById("status");
-const slots = { vault: "", counts: "", tab: "", ai: "AI off", sync: "" };
+const slots = { vault: "", counts: "", tab: "", embed: "", ai: "AI off", sync: "" };
 const titles = { ai: "No AI provider configured" };
 
 function render() {
   el.innerHTML = ["vault", "counts", "tab"].map(k => slots[k] ? `<span class="st st-${k}" title="${esc(titles[k] || "")}">${esc(slots[k])}</span>` : "").join("")
     + `<span class="st-fill"></span>`
-    + ["ai", "sync"].map(k => slots[k] ? `<span class="st st-${k}" title="${esc(titles[k] || "")}">${esc(slots[k])}</span>` : "").join("");
+    + ["embed", "ai", "sync"].map(k => slots[k] ? `<span class="st st-${k}" title="${esc(titles[k] || "")}">${esc(slots[k])}</span>` : "").join("");
 }
 
 export const status = {

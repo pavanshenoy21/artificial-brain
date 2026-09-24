@@ -36,15 +36,23 @@ function tauriBackend() {
     refetchLink: id => call("refetch_link", { id }),
     openCapture: () => call("open_capture"),
     hideCapture: () => call("hide_capture"),
-    getSettings: () => call("get_settings"),
+    getSettings: () => call("get_settings"),                  // secrets come back as "__saved__"
     saveSettings: settings => call("save_settings", { settings }),
-    onChange(fn) {
+    testAi: settings => call("test_ai", { settings }),       // { ok, message }
+    testEmbed: settings => call("test_embed", { settings }),
+    semanticSearch: (query, limit = 20) => call("semantic_search", { query, limit }), // [{ id, score }]
+    embedStatus: () => call("embed_status"),                  // { state, done, total, message }
+    embedAll: () => call("embed_all"),
+    on(event, fn) {
       let un;
       let dead = false;
       import("@tauri-apps/api/event")
-        .then(({ listen }) => listen("vault-changed", e => fn(e.payload)))
+        .then(({ listen }) => listen(event, e => fn(e.payload)))
         .then(u => (dead ? u() : (un = u)));
       return () => { dead = true; un?.(); };
+    },
+    onChange(fn) {
+      return this.on("vault-changed", fn);
     },
   };
 }

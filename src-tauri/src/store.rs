@@ -17,6 +17,9 @@ pub struct Graph {
     pub nodes: Vec<Item>,
     pub links: Vec<Link>,
     pub lobes: Vec<Lobe>,
+    /// Embedding-based suggestions; None = UI falls back to shared tags.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub similar: Option<Vec<Link>>,
 }
 
 #[derive(Debug, Default, Serialize, PartialEq)]
@@ -43,7 +46,7 @@ impl Store {
         // The index may belong to a different vault (vault switched): start clean.
         let root = store.vault.root().to_string_lossy().into_owned();
         if store.index.meta("vault")?.as_deref() != Some(root.as_str()) {
-            store.index.clear()?;
+            store.index.clear(true)?;
             store.index.set_meta("vault", &root)?;
         }
         store.sync()?;
@@ -86,19 +89,24 @@ impl Store {
             index::rebuild_links(&tx)?;
         }
         tx.commit()?;
+        if report.removed > 0 {
+            self.index.prune_embeddings()?;
+        }
         Ok(report)
     }
 
     /// Drops the whole index and rebuilds it from the files.
     pub fn rebuild(&mut self) -> Result<SyncReport> {
-        self.index.clear()?;
-        self.sync()
+        self.index.clear(false)?;
+        let r = self.sync()?;
+        self.index.prune_embeddings()?;
+        Ok(r)
     }
 
     // ------------------------------------------------------------ reads
 
     pub fn graph(&self) -> Result<Graph> {
-        Ok(Graph { nodes: self.index.items()?, links: self.index.links()?, lobes: self.vault.lobes()? })
+        Ok(Graph { nodes: self.index.items()?, links: self.index.links()?, lobes: self.vault.lobes()?, similar: None })
     }
 
     pub fn get(&self, id: &str) -> Result<Option<Item>> {

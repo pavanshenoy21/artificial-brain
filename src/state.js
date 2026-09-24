@@ -16,6 +16,7 @@ export const app = {
   lobe: new Map(),      // id -> lobe (includes Unsorted)
   adj: new Map(),       // id -> [{ id, kind, dir: "out" | "in" }]
   selected: null,       // id shown in the right sidebar
+  settings: null,       // settings.json (secrets redacted)
   linkIdx: new Map(),   // lowercase title / file name / path -> id
   loaded: false,
 
@@ -61,7 +62,9 @@ export const app = {
 
     const nodes = [...next.values()];
     const explicit = g.links.filter(l => next.has(l.source) && next.has(l.target));
-    const similar = g.similar ?? similarityLinks(nodes, explicit);
+    // embedding-based suggestions from the backend, else shared-tag stand-ins
+    const similar = g.similar ? g.similar.filter(l => next.has(l.source) && next.has(l.target)) : similarityLinks(nodes, explicit);
+    app.similarSource = g.similar ? "embeddings" : "tags";
     app.links = [...explicit, ...similar];
     app.adj = new Map(nodes.map(n => [n.id, []]));
     for (const l of app.links) {

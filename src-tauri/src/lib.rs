@@ -1,5 +1,7 @@
+mod ai;
 mod capture;
 mod commands;
+mod embed;
 mod enrich;
 mod error;
 mod index;
@@ -9,6 +11,9 @@ mod state;
 mod store;
 mod vault;
 mod watch;
+
+#[cfg(test)]
+mod tests_integration;
 
 use std::sync::Mutex;
 
@@ -46,6 +51,7 @@ pub fn run() {
                 open_error: Mutex::new(None),
             };
             commands::open_store(app.handle(), &state);
+            app.manage(embed::EmbedState::default());
             let shortcut = state.settings().shortcuts.capture;
             app.manage(state);
 
@@ -65,6 +71,7 @@ pub fn run() {
                     eprintln!("global shortcut {shortcut} unavailable: {e}");
                 }
             }
+            embed::backfill(app.handle());
             if std::env::args().any(|a| a == "--capture") {
                 let _ = capture::show_window(app.handle());
             }
@@ -90,6 +97,11 @@ pub fn run() {
             capture::refetch_link,
             capture::open_capture,
             capture::hide_capture,
+            commands::test_ai,
+            commands::test_embed,
+            embed::semantic_search,
+            embed::embed_status,
+            embed::embed_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

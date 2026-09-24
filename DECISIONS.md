@@ -66,3 +66,17 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - Summary without AI = the page's meta description, else its first two sentences. `enrich.rs` is the hook for AI summary, embedding and suggestions (milestones 6 and 8).
 - The fetched page text is not written into the vault (the body stays the user's); it's only used for the summary and the embedding.
 - In the browser preview the capture page has its own in-memory mock, and "fetching" is simulated.
+
+## Milestone 6: settings + AI layer
+- `ai.rs`: one OpenAI-compatible client (reqwest, shared, 120s timeout / 5s connect) for chat and embeddings; works for llama.cpp's `llama-server`, Groq and any compatible server. Error messages carry the provider's message, never the request. `<think>` blocks from local reasoning models are stripped.
+- Provider presets in Settings: llama.cpp (http://127.0.0.1:8080/v1), Groq (https://api.groq.com/openai/v1, default model llama-3.1-8b-instant), custom. Embeddings point at a second local server (suggested :8081) started with `--embedding`.
+- Embedding text = title, tags, summary-like fields, list fields, body (4000 chars). An FNV-1a hash of that text is stored with the vector so unchanged items are never re-embedded.
+- Vectors are normalised on write, kept as little-endian f32 blobs keyed by model name; they survive "Rebuild index" (no FK; pruned after sync) but are dropped when switching vaults.
+- Embedding runs in a background worker: saves are debounced 1.2s, then batches of 16; progress/errors go to the status bar (`embed-status`). An unreachable server stops the run and shows "Embeddings unavailable" with the reason; nothing else breaks.
+- Backfill (embed everything missing/stale) runs at startup, after imports, rebuilds, renames, outside edits and embedding-settings changes.
+- Similar links: brute-force cosine neighbours (8 candidates per item, cached until vectors change), then per item the top_k (default 3) with similarity ≥ min_score (default 0.55), skipping pairs already linked by a wikilink. Without embeddings the graph keeps using shared-tag similarity.
+- Semantic search embeds the query and blends into Ctrl K via the milestone-4 hook.
+- Settings save on change (Obsidian-style); lobes are edited as a batch with an explicit "Save lobes" (renaming several at once shouldn't write the file per keystroke). New lobe ids are slugs of the name.
+- Theme lives in settings.json; a copy in localStorage only avoids a flash of the wrong theme on start.
+- Changing the capture shortcut re-registers it immediately.
+- Integration test uses Tauri's mock runtime and a loopback fake embedding server; embed functions are generic over `Runtime` for that.

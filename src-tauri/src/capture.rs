@@ -42,6 +42,20 @@ pub fn show_window(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
+/// Swaps the global capture shortcut after a settings change.
+pub fn register_shortcut(app: &AppHandle, old: &str, new: &str) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let gs = app.global_shortcut();
+    if !old.trim().is_empty() {
+        let _ = gs.unregister(old);
+    }
+    if !new.trim().is_empty() {
+        if let Err(e) = gs.register(new) {
+            eprintln!("global shortcut {new} unavailable: {e}");
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn open_capture(app: AppHandle) -> std::result::Result<(), String> {
     show_window(&app).map_err(|e| e.to_string())
@@ -158,7 +172,7 @@ async fn run_pipeline(app: &AppHandle, id: &str) -> Result<()> {
     let _ = app.emit("vault-changed", json!({ "kind": "items" }));
 
     progress(app, id, "embedding");
-    crate::enrich::after_save(app, id, Some(&page.text)).await;
+    crate::enrich::after_save(app, id).await;
     Ok(())
 }
 

@@ -287,3 +287,29 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .row-state.failed { color: var(--danger); }
 .item-status { font-size: 12px; color: var(--muted); margin: -2px 0 6px; }
 .item-status.failed { color: var(--danger); }
+
+/* ---------------------------------------------------------------- settings */
+.settings h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 28px 0 6px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.set-row { display: flex; align-items: center; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.set-row:last-child { border-bottom: 0; }
+.set-text { flex: 1; min-width: 0; }
+.set-label { font-weight: 500; }
+.set-desc { color: var(--muted); font-size: 12px; margin: 2px 0 0; }
+.set-desc code, .set-path { font: 11.5px var(--mono); background: var(--bg-raised); border: 1px solid var(--border); padding: 1px 4px; border-radius: 3px; }
+.set-path { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+.set-control { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 60%; }
+.set-control .input { width: 280px; }
+.set-control input[type=number].input { width: 90px; }
+.set-control select.input { width: 200px; padding: 0 4px; }
+.set-control input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+.set-off { opacity: .45; pointer-events: none; }
+.set-result { font-size: 12px; color: var(--muted); max-width: 360px; }
+.set-result.ok { color: var(--ok); }
+.set-result.error { color: var(--danger); }
+.set-actions { display: flex; gap: 8px; margin: 10px 0 4px; }
+.lobe-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.lobe-row { display: flex; align-items: center; gap: 8px; }
+.lobe-row input[type=color] { width: 28px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none; cursor: pointer; }
+.lobe-row .input { width: 260px; }
+.lobe-id { font: 11px var(--mono); width: 90px; overflow: hidden; text-overflow: ellipsis; }
+.lobe-row .count { width: 28px; text-align: right; }

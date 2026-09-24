@@ -188,7 +188,7 @@ export function createGraphView(container) {
   let lobeFx = [];
   function buildLobes() {
     for (const fx of lobeFx) scene.remove(fx.label);
-    lobeFx = [...app.lobes, app.lobe.get(UNSORTED.id)].map(l => {
+    lobeFx = [...app.lobes, app.lobe.get(UNSORTED.id)].filter(Boolean).map(l => {
       const label = new SpriteText(l.name, 7, l.color);
       label.fontFace = cssVar("--font") || "system-ui, sans-serif";
       label.fontWeight = "600";

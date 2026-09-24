@@ -32,12 +32,39 @@ pub struct AiSettings {
     pub api_key: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct EmbedSettings {
     /// OpenAI-compatible embeddings endpoint (local llama.cpp server); "" = off.
     pub base_url: String,
     pub model: String,
+    /// Suggested links per item.
+    pub top_k: usize,
+    /// Minimum cosine similarity for a suggested link.
+    pub min_score: f32,
+}
+
+impl Default for EmbedSettings {
+    fn default() -> Self {
+        EmbedSettings { base_url: String::new(), model: String::new(), top_k: 3, min_score: 0.55 }
+    }
+}
+
+impl EmbedSettings {
+    pub fn enabled(&self) -> bool {
+        !self.base_url.trim().is_empty()
+    }
+    /// Model name used to key stored vectors ("default" when the server picks).
+    pub fn key(&self) -> String {
+        let m = self.model.trim();
+        if m.is_empty() { "default".into() } else { m.into() }
+    }
+}
+
+impl AiSettings {
+    pub fn enabled(&self) -> bool {
+        !self.provider.is_empty() && !self.base_url.trim().is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

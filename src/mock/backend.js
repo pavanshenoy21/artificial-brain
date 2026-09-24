@@ -29,7 +29,7 @@ export function normalizeUrl(text) {
 export const DEFAULT_SETTINGS = {
   vault: "", theme: "dark",
   ai: { provider: "", base_url: "", model: "", api_key: "" },
-  embed: { base_url: "", model: "" },
+  embed: { base_url: "", model: "", top_k: 3, min_score: 0.55 },
   github: { token: "", auto_sync: true },
   shortcuts: { capture: "CommandOrControl+Shift+Space" },
 };
@@ -43,6 +43,8 @@ export function createMockBackend({ seed = true } = {}) {
   let settings = structuredClone(DEFAULT_SETTINGS);
   const listeners = new Set();
   const emit = kind => listeners.forEach(fn => fn({ kind }));
+  const eventListeners = new Map();
+  const emitEvent = (event, payload) => eventListeners.get(event)?.forEach(fn => fn(payload));
 
   function uniquePath(type, title, selfId) {
     const dir = TYPE[type]?.dir || "notes";
@@ -244,7 +246,27 @@ export function createMockBackend({ seed = true } = {}) {
     },
     async saveSettings(next) {
       settings = clone(next);
+      emitEvent("settings-changed", clone(settings));
       return clone(settings);
+    },
+    async testAi() {
+      return { ok: false, message: "Browser preview: no network calls. Test this in the desktop app." };
+    },
+    async testEmbed() {
+      return { ok: false, message: "Browser preview: no network calls. Test this in the desktop app." };
+    },
+    async semanticSearch() {
+      return [];
+    },
+    async embedStatus() {
+      return { state: settings.embed.base_url ? "idle" : "off", done: 0, total: 0, message: "" };
+    },
+    async embedAll() {},
+    on(event, fn) {
+      if (event === "vault-changed") return api.onChange(fn);
+      if (!eventListeners.has(event)) eventListeners.set(event, new Set());
+      eventListeners.get(event).add(fn);
+      return () => eventListeners.get(event).delete(fn);
     },
     onChange(fn) {
       listeners.add(fn);
@@ -254,9 +276,9 @@ export function createMockBackend({ seed = true } = {}) {
 
   const ready = seed ? api.importSample() : Promise.resolve();
   // every call waits for the seed, so nothing sees a half-filled vault
-  const guarded = { onChange: api.onChange };
+  const guarded = { onChange: api.onChange, on: api.on };
   for (const [k, fn] of Object.entries(api))
-    if (k !== "onChange" && k !== "importSample") guarded[k] = async (...a) => { await ready; return fn(...a); };
+    if (k !== "onChange" && k !== "on" && k !== "importSample") guarded[k] = async (...a) => { await ready; return fn(...a); };
   guarded.importSample = api.importSample;
   return guarded;
 }

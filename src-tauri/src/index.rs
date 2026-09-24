@@ -12,7 +12,7 @@ use crate::error::Result;
 use crate::markdown as md;
 use crate::vault::Item;
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Link {
@@ -93,8 +93,9 @@ impl Index {
              CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
                id UNINDEXED, title, tags, body, extra, tokenize = 'unicode61 remove_diacritics 2'
              );
+             -- no foreign key: vectors survive a rebuild and are pruned after sync
              CREATE TABLE IF NOT EXISTS embeddings (
-               item_id TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+               item_id TEXT PRIMARY KEY,
                model   TEXT NOT NULL,
                dim     INTEGER NOT NULL,
                hash    TEXT NOT NULL,   -- hash of the embedded text, to skip unchanged items
@@ -124,9 +125,50 @@ impl Index {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn clear(&mut self) -> Result<()> {
+    /// Empties the index. Embeddings are kept unless `embeddings` is set
+    /// (a rebuild keeps them; switching vaults doesn't).
+    pub fn clear(&mut self, embeddings: bool) -> Result<()> {
         self.db.execute_batch("DELETE FROM items; DELETE FROM items_fts;")?;
+        if embeddings {
+            self.db.execute("DELETE FROM embeddings", [])?;
+        }
         Ok(())
+    }
+
+    // ------------------------------------------------------------ embeddings
+
+    pub fn set_embedding(&self, id: &str, model: &str, hash: &str, v: &[f32]) -> Result<()> {
+        let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+        self.db.execute(
+            "INSERT OR REPLACE INTO embeddings (item_id, model, dim, hash, vector) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, model, v.len() as i64, hash, bytes],
+        )?;
+        Ok(())
+    }
+
+    /// id -> hash of the text that was embedded, for one model.
+    pub fn embedding_hashes(&self, model: &str) -> Result<HashMap<String, String>> {
+        let mut stmt = self.db.prepare("SELECT item_id, hash FROM embeddings WHERE model = ?1")?;
+        let rows = stmt.query_map([model], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// All vectors for one model, only for items that still exist.
+    pub fn embeddings(&self, model: &str) -> Result<Vec<(String, Vec<f32>)>> {
+        let mut stmt = self.db.prepare(
+            "SELECT e.item_id, e.vector FROM embeddings e JOIN items i ON i.id = e.item_id WHERE e.model = ?1 ORDER BY e.item_id",
+        )?;
+        let rows = stmt.query_map([model], |r| {
+            let id: String = r.get(0)?;
+            let bytes: Vec<u8> = r.get(1)?;
+            Ok((id, bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Drops vectors of items that no longer exist.
+    pub fn prune_embeddings(&self) -> Result<usize> {
+        Ok(self.db.execute("DELETE FROM embeddings WHERE item_id NOT IN (SELECT id FROM items)", [])?)
     }
 
     pub fn meta(&self, key: &str) -> Result<Option<String>> {
@@ -358,6 +400,22 @@ mod tests {
         let links = idx.links().unwrap();
         let pairs: Vec<_> = links.iter().map(|l| (l.source.as_str(), l.target.as_str())).collect();
         assert_eq!(pairs, vec![("a", "b"), ("a", "c"), ("c", "a")]);
+    }
+
+    #[test]
+    fn embeddings_round_trip_and_prune() {
+        let mut idx = Index::memory().unwrap();
+        add(&mut idx, "notes/A.md", "---\nid: a\n---\n");
+        idx.set_embedding("a", "m", "h1", &[0.5, -1.0, 2.25]).unwrap();
+        idx.set_embedding("gone", "m", "h2", &[1.0, 0.0, 0.0]).unwrap();
+        assert_eq!(idx.embeddings("m").unwrap(), vec![("a".to_string(), vec![0.5, -1.0, 2.25])]);
+        assert_eq!(idx.embeddings("other").unwrap().len(), 0);
+        assert_eq!(idx.embedding_hashes("m").unwrap().len(), 2);
+        assert_eq!(idx.prune_embeddings().unwrap(), 1);
+        idx.clear(false).unwrap();
+        assert_eq!(idx.embedding_hashes("m").unwrap().len(), 1, "rebuild keeps vectors");
+        idx.clear(true).unwrap();
+        assert!(idx.embedding_hashes("m").unwrap().is_empty());
     }
 
     #[test]

@@ -33,6 +33,9 @@ pub fn start(app: &AppHandle, root: &Path) -> Option<Watcher> {
         if changed || lobes {
             let _ = handle.emit("vault-changed", serde_json::json!({ "kind": "external" }));
         }
+        if changed {
+            crate::embed::backfill(&handle);
+        }
     });
     match debouncer {
         Ok(mut d) => match d.watcher().watch(root, RecursiveMode::Recursive) {

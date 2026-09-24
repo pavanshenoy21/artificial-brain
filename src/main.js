@@ -19,6 +19,9 @@ import { initEmptyState } from "./shell/empty.js";
 import { newItem } from "./actions.js";
 import { openCommands } from "./palette/commands.js";
 import { registerCoreCommands } from "./core-commands.js";
+import { settingsTab, PROVIDERS } from "./settings/view.js";
+import { setSemanticSearch } from "./palette/search.js";
+import { registerCommand } from "./palette/commands.js";
 
 // ------------------------------------------------------------------ tabs + graph
 let graph;
@@ -30,6 +33,8 @@ tabs.register("graph", pane => {
   return {};
 });
 tabs.register("item", itemTab);
+tabs.register("settings", settingsTab);
+const openSettings = () => tabs.openView("settings", { title: "Settings", iconName: "settings" });
 tabs.addGraph();
 
 const rightSide = initRightSidebar();
@@ -85,15 +90,41 @@ ribbonButton({ iconName: "command", title: "Commands (Ctrl P)", onClick: openCom
 ribbonButton({ iconName: "plus", title: "New note (Ctrl N)", onClick: () => newItem("note") });
 ribbonButton({ iconName: "capture", title: "Quick capture (Ctrl Shift Space)", onClick: () => api.openCapture() });
 
-const themeBtn = ribbonButton({
+ribbonButton({
   iconName: "sun", title: "Toggle theme", bottom: true,
   onClick: () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"),
 });
-function setTheme(t) {
+ribbonButton({ iconName: "settings", title: "Settings", bottom: true, onClick: () => openSettings() });
+registerCommand({ id: "settings", title: "Open settings", iconName: "settings", run: () => openSettings() });
+
+// Theme: settings.json is the truth; prefs keep a copy so the first paint is right.
+function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   prefs.set("theme", t);
   graph.applyTheme();
 }
+function setTheme(t) {
+  applyTheme(t);
+  if (app.settings && app.settings.theme !== t) {
+    api.saveSettings({ ...app.settings, theme: t }).then(s => { app.settings = s; app.emit("settings", s); }).catch(() => {});
+  }
+}
+app.on("theme", applyTheme);
+
+// ------------------------------------------------------------------ AI status
+function showAi(s) {
+  const p = s?.ai?.provider;
+  if (!p || !s.ai.base_url) status.set("ai", "AI off", "No AI provider configured (Settings)");
+  else status.set("ai", `AI: ${PROVIDERS[p]?.name.replace(/ \(local\)$/, "") || p}`, [s.ai.model, s.ai.base_url].filter(Boolean).join(" · "));
+  setSemanticSearch(s?.embed?.base_url ? q => api.semanticSearch(q, 20) : null);
+}
+app.on("settings", showAi);
+api.on("settings-changed", s => { app.settings = s; showAi(s); });
+api.on("embed-status", st => {
+  if (st.state === "working") status.set("embed", `Embedding ${st.done}/${st.total}`, "");
+  else if (st.state === "error") status.set("embed", "Embeddings unavailable", st.message);
+  else status.set("embed", "");
+});
 
 registerCoreCommands({ graph, tabs, left, right, search, setTheme });
 
@@ -131,6 +162,9 @@ function showVault(info) {
 }
 app.on("vault", showVault);
 showVault(await api.vaultInfo());
+app.settings = await api.getSettings().catch(() => null);
+if (app.settings?.theme && app.settings.theme !== document.documentElement.dataset.theme) applyTheme(app.settings.theme);
+showAi(app.settings);
 try {
   await app.reload();
 } catch (e) {

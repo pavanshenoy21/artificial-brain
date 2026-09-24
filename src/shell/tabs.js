@@ -21,7 +21,7 @@ function save() {
 
 function titleOf(t) {
   if (t.kind === "graph") return { html: icon("graph", { size: 14 }), text: "Graph" };
-  if (t.kind === "view") return { html: icon(t.iconName || "file", { size: 14 }), text: t.title };
+  if (t.kind !== "item") return { html: icon(t.iconName || "file", { size: 14 }), text: t.title || t.kind };
   const n = app.items.get(t.id);
   if (!n) return { html: icon("file", { size: 14 }), text: "Missing" };
   return { html: typeIcon(n.type, app.lobeOf(n).color, 12), text: n.title };
