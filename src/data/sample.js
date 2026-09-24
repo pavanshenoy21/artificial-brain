@@ -1,25 +1,15 @@
-// Sample brain shown while the vault is empty (and importable into it).
-// Same shape the Rust store returns from load_graph:
+// Sample brain: seeds the browser mock backend and "Import sample data".
+// Shape:
 //   { nodes: [{ id, type, lobe, title, tags, ...fields }], links: [{ source, target, kind }] }
 // kind: "explicit" = a link you made yourself, "similar" = computed by shared tags / embeddings.
 
-import { similarityLinks } from "./similar.js";
-
 export const LOBES = [
-  { id: "sec", name: "Security & CTF",          color: "#ff4d8d", center: [-115, 38, 45] },
-  { id: "web", name: "Web & Apps",              color: "#4cc9f0", center: [115, 38, 45] },
-  { id: "ai",  name: "AI & ML",                 color: "#b388ff", center: [0, 100, -25] },
-  { id: "cp",  name: "Competitive Programming", color: "#ffb703", center: [-105, -15, -95] },
-  { id: "sys", name: "Linux & Systems",         color: "#7ae582", center: [105, -15, -95] },
-  { id: "col", name: "College & Life",          color: "#ff8a5b", center: [0, -90, 0] },
-];
-
-export const TYPES = [
-  { id: "note",      name: "Notes" },
-  { id: "link",      name: "Saved links" },
-  { id: "skill",     name: "Skills" },
-  { id: "hackathon", name: "Hackathons" },
-  { id: "project",   name: "Projects" },
+  { id: "sec", name: "Security & CTF",          color: "#e06c75" },
+  { id: "web", name: "Web & Apps",              color: "#56b6c2" },
+  { id: "ai",  name: "AI & ML",                 color: "#a98fe0" },
+  { id: "cp",  name: "Competitive Programming", color: "#d6a64f" },
+  { id: "sys", name: "Linux & Systems",         color: "#7fb77e" },
+  { id: "col", name: "College & Life",          color: "#d98a5f" },
 ];
 
 let seq = 0;
@@ -132,11 +122,11 @@ const E = [
   [hackNight, club],
 ];
 
+// { nodes, links } with explicit links as edges. The Rust import (and the mock
+// backend) turn those edges into "Related: [[...]]" lines in the source note.
 export function buildSampleGraph() {
-  const links = E.map(([source, target]) => ({ source, target, kind: "explicit" }));
   return {
     nodes: nodes.map(x => ({ ...x })),
-    links: [...links, ...similarityLinks(nodes, links)],
-    sample: true,
+    links: E.map(([source, target]) => ({ source, target, kind: "explicit" })),
   };
 }

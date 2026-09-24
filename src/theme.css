@@ -1,0 +1,65 @@
+/* All colours live here. Dark is the default; light via [data-theme="light"]. */
+:root {
+  --bg: #1e1e1e;
+  --bg-side: #181818;
+  --bg-raised: #252525;
+  --bg-hover: #2a2a2a;
+  --bg-active: #303030;
+  --border: #2e2e2e;
+  --border-strong: #3a3a3a;
+  --text: #dcddde;
+  --muted: #999;
+  --faint: #666;
+  --accent: #7c8cff;
+  --accent-text: #fff;
+  --accent-soft: rgba(124, 140, 255, 0.16);
+  --danger: #e06c6c;
+  --ok: #7fb77e;
+  --warn: #d6a64f;
+
+  /* graph */
+  --graph-bg: #1e1e1e;
+  --graph-link: #5c5c5c;
+  --graph-similar: #4a4a4a;
+  --graph-label: #cfcfcf;
+  --unsorted: #8a8a8a;
+
+  --shadow-pop: 0 6px 20px rgba(0, 0, 0, 0.35);
+  --radius: 5px;
+  --font: system-ui, -apple-system, "Segoe UI", Cantarell, "Noto Sans", Ubuntu, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "Cascadia Code", "DejaVu Sans Mono", monospace;
+  --dur: 160ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-side: #f6f6f6;
+  --bg-raised: #fafafa;
+  --bg-hover: #ececec;
+  --bg-active: #e3e3e3;
+  --border: #e0e0e0;
+  --border-strong: #cfcfcf;
+  --text: #2e3338;
+  --muted: #6b6b6b;
+  --faint: #9a9a9a;
+  --accent: #5a67d8;
+  --accent-soft: rgba(90, 103, 216, 0.12);
+  --danger: #c94a4a;
+  --ok: #3f8a3e;
+  --warn: #a8771a;
+
+  --graph-bg: #ffffff;
+  --graph-link: #b8b8b8;
+  --graph-similar: #d0d0d0;
+  --graph-label: #3a3a3a;
+  --unsorted: #a0a0a0;
+
+  --shadow-pop: 0 6px 20px rgba(0, 0, 0, 0.12);
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur: 0ms; }
+}

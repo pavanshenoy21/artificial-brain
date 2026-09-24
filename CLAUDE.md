@@ -183,10 +183,12 @@ Esc clear focus / close palette.
 - Don't commit secrets, `node_modules`, `dist` or `target`.
 
 ## Current state
-- MVP graph view only, running on sample data (`src/data/sample.js`). Rust `load_graph` reads
-  `graph.json` from the app data dir if it exists.
-- Working: lobes + halos, per-type shapes, focus mode, semantic zoom labels, legend filters, fly to lobe,
-  idle orbit, 2D/3D switch (V), search palette + travel animation, detail panel. Polish/Edit are placeholders.
-- Code map: `src/main.js` (graph, forces, focus, zoom, 2D/3D, wiring), `search.js`, `travel.js`,
-  `panel.js`, `shapes.js`, `util.js`, `src-tauri/src/lib.rs`.
-- Run: `npm install && npm run tauri dev` (UI only, in a browser: `npm run dev`, port 1420).
+- Milestone 1 (shell + restyle) done. Milestone 2 partly done earlier: markdown vault + SQLite index + Rust CRUD
+  (`src-tauri/src/{store.rs,markdown.rs,lib.rs}`), still to do: FTS, watcher, ULIDs, `~/Brain`, lobes.json, empty state.
+- Frontend: `main.js` (bootstrap, keys), `state.js` (shared state + events), `api.js` (+ `mock/backend.js`),
+  `shell/` (layout, tabs, statusbar), `graph/view.js`, `sidebar/` (left: files/tags/filters, right: item),
+  `palette/` (generic palette + search), `editor/` (item tab reading view, markdown-it), `lib/` (types, lobes,
+  wikilinks, prefs), `theme.css` + `app.css`.
+- Run: `npm install && npm run tauri dev` (browser only: `npm run dev`, port 1420; `?empty` = empty mock vault).
+  Rust tests: `cd src-tauri && cargo test`.
+- See `DECISIONS.md` and `TODO-PAVVY.md`.

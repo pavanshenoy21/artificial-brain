@@ -4,75 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Artificial Brain</title>
-    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/theme.css" />
+    <link rel="stylesheet" href="/src/app.css" />
+    <script>
+      // apply the saved theme before first paint
+      try { var t = JSON.parse(localStorage.getItem("brain.prefs") || "{}").theme; if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+    </script>
   </head>
   <body>
-    <div id="graph"></div>
+    <div class="app" id="app">
+      <nav class="ribbon" id="ribbon" aria-label="Ribbon"></nav>
 
-    <!-- top bar -->
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark"></span>
-        <div>
-          <div class="brand-name">Artificial Brain</div>
-          <div class="brand-stats" id="stats">—</div>
-        </div>
-        <button class="chip chip-sample" id="sample-chip" type="button" disabled hidden>sample data</button>
-      </div>
-      <button class="search-trigger" id="search-open" type="button">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.8"/><path d="m10.6 10.6 3.4 3.4"/></svg>
-        <span>Search your brain</span>
-        <kbd>Ctrl K</kbd>
-      </button>
-      <div class="toggles">
-        <div class="seg" id="view-mode" role="group" aria-label="View" title="Switch view (V)">
-          <button type="button" data-mode="2d">2D</button>
-          <button type="button" data-mode="3d">3D</button>
-        </div>
-        <label class="switch"><input type="checkbox" id="t-similar" checked /><span></span>Similar links</label>
-        <label class="switch" id="rotate-switch"><input type="checkbox" id="t-rotate" checked /><span></span>Idle orbit</label>
-      </div>
-    </header>
+      <aside class="sidebar sidebar-left" id="left" aria-label="Left sidebar">
+        <div class="side-tabs" id="left-tabs" role="tablist"></div>
+        <div class="side-body" id="left-body"></div>
+      </aside>
+      <div class="resizer" data-side="left" title="Drag to resize"></div>
 
-    <!-- legend / filters -->
-    <aside class="legend glass">
-      <div class="legend-title">Types</div>
-      <div id="type-list" class="legend-list"></div>
-      <div class="legend-title">Lobes</div>
-      <div id="lobe-list" class="legend-list"></div>
-      <div class="legend-key">
-        <span><i class="line solid"></i>your links</span>
-        <span><i class="line faint"></i>similar</span>
-      </div>
-    </aside>
+      <main class="workspace">
+        <div class="tabbar" id="tabbar"></div>
+        <div class="panes" id="panes"></div>
+      </main>
 
-    <!-- focus breadcrumb -->
-    <div class="focus-bar glass" id="focus-bar" hidden>
-      <span id="focus-label"></span>
-      <button type="button" id="focus-clear">Esc · show all</button>
+      <div class="resizer" data-side="right" title="Drag to resize"></div>
+      <aside class="sidebar sidebar-right" id="right" aria-label="Right sidebar">
+        <div class="side-tabs" id="right-tabs" role="tablist"></div>
+        <div class="side-body" id="right-body"></div>
+      </aside>
     </div>
+    <footer class="statusbar" id="status"></footer>
 
-    <div class="hint"><span id="hint-drag">drag to rotate</span> · scroll to zoom · click a node to focus · <kbd>/</kbd> search · <kbd>V</kbd> 2D/3D</div>
-
-    <!-- detail panel: outer box keeps its layout so the travel animation can measure it -->
-    <section class="panel" id="panel" aria-hidden="true">
-      <div class="panel-inner glass" id="panel-inner"></div>
-    </section>
-
-    <!-- search palette -->
-    <div class="palette-backdrop" id="palette" hidden>
-      <div class="palette glass" role="dialog" aria-label="Search">
-        <div class="palette-input">
-          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.8"/><path d="m10.6 10.6 3.4 3.4"/></svg>
-          <input id="palette-input" placeholder="Search notes, links, skills, projects…" autocomplete="off" spellcheck="false" />
-          <kbd>Esc</kbd>
-        </div>
-        <ul id="palette-results" class="palette-results"></ul>
-        <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span></div>
-      </div>
-    </div>
-
-    <!-- layer for the travel animation -->
+    <div class="modal-backdrop" id="palette" hidden></div>
     <div id="fx-layer" class="fx-layer"></div>
 
     <script type="module" src="/src/main.js"></script>
