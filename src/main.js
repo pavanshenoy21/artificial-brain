@@ -146,6 +146,7 @@ window.addEventListener("keydown", e => {
   if (mod && e.key === "Tab") { e.preventDefault(); tabs.next(e.shiftKey ? -1 : 1); return; }
   if (mod && k === "n" && !e.shiftKey) { e.preventDefault(); newItem("note"); return; }
   if (mod && k === "e") { e.preventDefault(); tabs.active?.view.toggleMode?.(); return; }
+  if (mod && e.key === "Enter" && !typing()) { e.preventDefault(); app.emit("accept-suggestions"); return; }
   if (typing() || mod || e.altKey) return;
   if (graphActive()) {
     if (k === "v") graph.toggleView();

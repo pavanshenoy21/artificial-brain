@@ -481,6 +481,18 @@ mod tests {
     }
 
     #[test]
+    fn history_keeps_originals() {
+        let (_t, mut s) = setup();
+        let n = s.create(obj(json!({ "title": "Draft: one", "body": "teh original" }))).unwrap();
+        let orig = s.vault.read(&s.file_of(&n.id).unwrap()).unwrap();
+        let f = s.vault.save_history(&orig).unwrap();
+        assert!(f.starts_with(s.vault.abs(".brain/history")));
+        assert!(fs::read_to_string(&f).unwrap().contains("teh original"));
+        s.update(&n.id, obj(json!({ "body": "the polished" }))).unwrap();
+        assert_eq!(s.sync().unwrap().scanned, 1, "history files aren't items");
+    }
+
+    #[test]
     fn lobes_validate() {
         let (_t, s) = setup();
         let mut lobes = s.lobes().unwrap();

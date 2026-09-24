@@ -29,6 +29,7 @@
     "@tauri-apps/plugin-opener": "^2.5.5",
     "3d-force-graph": "^1.80.0",
     "codemirror": "^6.0.2",
+    "diff": "^9.0.0",
     "lucide": "^1.48.0",
     "markdown-it": "^15.0.2",
     "three": "^0.186.0",

@@ -1,4 +1,5 @@
 mod ai;
+mod assist;
 mod capture;
 mod commands;
 mod embed;
@@ -107,6 +108,11 @@ pub fn run() {
             github::github_sync,
             github::github_status,
             github::github_test,
+            assist::ai_polish,
+            assist::ai_summarize,
+            assist::ai_fill_form,
+            assist::ai_suggest,
+            assist::ai_apply,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

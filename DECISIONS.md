@@ -92,3 +92,12 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - New projects start with status active (archived repos: archived). Unchanged repos cause no file write.
 - Last sync time is stored in the index's meta table; auto-sync on startup when enabled and older than 24h. Progress and errors show in the status bar.
 - The GitHub API base is a parameter so tests run against a loopback fake GitHub (pagination, languages, README, 401).
+
+## Milestone 8: AI actions + suggestions
+- `assist.rs` holds the prompts and commands; every prompt says never to add facts and to keep [[wikilinks]], URLs and code as written. Answers are unwrapped from code fences.
+- Polish rewrites the body (or the selection); Summarize writes a `summary:` field for items (a selection is replaced by its summary); Fill form asks for JSON limited to the type's fields and drops unknown keys, empty values and non-string junk. GitHub-owned fields are never offered to the model.
+- Nothing is written until Accept. `ai_apply` saves the whole original file to `.brain/history/<title> <timestamp>.md` first (history files aren't items: dot-folder). Selection edits are applied to the saved body, and refused if the note changed while the model was thinking.
+- Review dialog: word-level diff (jsdiff `diffWords`) for text, a field table for form fills; Accept = Ctrl Enter, Reject = Esc.
+- Right-click menus on graph nodes, file/tag/inbox rows, sidebar link lists and in the editor. AI items stay in the menu but are disabled with "Set up an AI provider in Settings to use this" when AI is off (the design brief: AI looks like normal features).
+- Tag/lobe suggestions: the model may only pick from existing tags and lobe ids; the backend enforces that (case-insensitive match to the real tag, max 3, not already on the item). Items in the Inbox get suggestions automatically when selected (cached per item version); other items on request. Chips accept one at a time; Ctrl Enter accepts all when focus isn't in an editor.
+- The browser preview has a deterministic fake AI (only when a provider is chosen in Settings) so the UI can be exercised without a model.

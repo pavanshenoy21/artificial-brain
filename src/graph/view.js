@@ -11,6 +11,7 @@ import { TYPES, TYPE } from "../lib/types.js";
 import { typeIcon } from "../icons.js";
 import { esc, reduceMotion } from "../util.js";
 import { prefs } from "../lib/prefs.js";
+import { itemMenu } from "../ai/actions.js";
 
 const idOf = x => (x && typeof x === "object" ? x.id : x);
 const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -141,6 +142,7 @@ export function createGraphView(container) {
     .linkPositionUpdate(updateLink)
     .linkVisibility(linkVisible)
     .onNodeClick(onNodeClick)
+    .onNodeRightClick((n, e) => itemMenu(n.id, { x: e.clientX, y: e.clientY }))
     .onNodeHover(n => { state.hover = n; el.style.cursor = n ? "pointer" : ""; })
     .onBackgroundClick(() => { if (state.focus) api.clearFocus(); })
     .onEngineTick(updateLobes)

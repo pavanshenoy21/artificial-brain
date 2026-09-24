@@ -8,6 +8,7 @@ import { newItem, importSample, openVaultFolder, rebuildIndex, deleteItem, syncG
 import { TYPES } from "./lib/types.js";
 import { toast } from "./shell/toast.js";
 import { openNewDialog } from "./forms/new-dialog.js";
+import { polishItem, summarizeItem, fillFormItem, aiOn, AI_OFF } from "./ai/actions.js";
 
 export function registerCoreCommands({ graph, tabs, left, right, search, setTheme }) {
   const itemTab = () => (tabs.active?.kind === "item" ? tabs.active : null);
@@ -46,6 +47,12 @@ export function registerCoreCommands({ graph, tabs, left, right, search, setThem
 
   reg({ id: "sync-github", title: "Sync GitHub projects", iconName: "github",
     disabled: () => (app.settings?.github?.token ? false : "Add a GitHub token in Settings"), run: syncGithub });
+  const ai = () => (aiOn() ? false : AI_OFF);
+  reg({ id: "ai-polish", title: "Polish current item", iconName: "edit", when: () => !!current(), disabled: ai, run: () => polishItem(current().id) });
+  reg({ id: "ai-summarize", title: "Summarize current item", iconName: "read", when: () => !!current(), disabled: ai, run: () => summarizeItem(current().id) });
+  reg({ id: "ai-fill", title: "Fill form from the note text", iconName: "filters", when: () => !!current() && current().type !== "note", disabled: ai, run: () => fillFormItem(current().id) });
+  reg({ id: "ai-suggest", title: "Suggest tags and lobe", iconName: "tags", when: () => !!current(), disabled: ai,
+    run: () => { app.select(current().id, { source: "list" }); app.emit("suggest", current().id); } });
   reg({ id: "rebuild-index", title: "Rebuild index", iconName: "refresh", run: rebuildIndex });
   reg({ id: "reload", title: "Reload vault", iconName: "refresh", run: () => app.reload() });
   reg({ id: "import-sample", title: "Import sample data", iconName: "download", run: importSample });

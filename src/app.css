@@ -328,3 +328,34 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .dialog-body .prop input, .dialog-body .prop select, .dialog-body .prop textarea { border-color: var(--border); background: var(--bg); }
 .dialog-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
 .dialog-error { flex: 1; color: var(--danger); font-size: 12px; }
+
+/* ---------------------------------------------------------------- menu, review, suggestions */
+.menu {
+  position: fixed; z-index: 70; min-width: 200px; padding: 4px; background: var(--bg-raised);
+  border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: var(--shadow-pop);
+}
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; background: none; border: 0; border-radius: 4px; text-align: left; }
+.menu-item:hover:not([aria-disabled]), .menu-item:focus-visible { background: var(--bg-active); outline: none; }
+.menu-item[aria-disabled] { color: var(--faint); cursor: default; }
+.menu-item kbd { margin-left: auto; }
+.menu-gap { width: 14px; }
+.menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+.review { width: min(760px, calc(100vw - 32px)); }
+.review:focus { outline: none; }
+.review-body { max-height: 60vh; }
+.review-diff { white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; }
+.review ins { background: rgba(127, 183, 126, .22); color: var(--text); text-decoration: none; border-radius: 2px; }
+.review del { background: rgba(224, 108, 108, .2); color: var(--muted); border-radius: 2px; }
+.review-fields { border-collapse: collapse; width: 100%; }
+.review-fields th { text-align: left; font-weight: 500; color: var(--muted); padding: 6px 12px 6px 0; vertical-align: top; width: 110px; text-transform: capitalize; }
+.review-fields td { padding: 6px 0; white-space: pre-wrap; }
+.review-note { font-size: 11.5px; margin-right: auto; }
+.review .dialog-error { flex: 0 1 auto; }
+.btn kbd { margin-left: 4px; font-size: 10px; padding: 1px 3px; }
+.btn.primary kbd { color: inherit; border-color: rgba(255,255,255,.4); background: transparent; }
+.sugg-body { padding: 2px 12px 4px; }
+.sugg-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag.sugg { border: 1px dashed var(--accent); background: transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.tag.sugg:hover { background: var(--accent-soft); }
+.sugg-body .empty-note { padding: 2px 0; }
+.error-text { color: var(--danger); }

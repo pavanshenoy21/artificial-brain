@@ -149,7 +149,6 @@ impl Vault {
     }
 
     /// Keeps an original before an AI action changes it (`.brain/history/`).
-    #[allow(dead_code)] // used from milestone 8 (AI actions)
     pub fn save_history(&self, item: &Item) -> Result<PathBuf> {
         let dir = self.root.join(".brain").join("history");
         fs::create_dir_all(&dir)?;

@@ -8,6 +8,7 @@ import { icon, typeIcon } from "../icons.js";
 import { FORMS, TYPE, TYPES } from "../lib/types.js";
 import { fieldControl, readValue, bindLinkInputs } from "../forms/fields.js";
 import { UNSORTED } from "../lib/lobes.js";
+import { itemMenu, aiOn, AI_OFF } from "../ai/actions.js";
 import { esc, openExternal } from "../util.js";
 import { eachWikilink, linkTarget } from "../lib/wikilinks.js";
 import { deleteItem } from "../actions.js";
@@ -36,6 +37,60 @@ export function initRightSidebar() {
   const pane = right.add({ id: "item", title: "Item", iconName: "info" });
   let confirmDelete = false;
   let deferred = false;
+  // AI tag/lobe suggestions per item: { key (updated stamp), loading, tags, lobe, error }
+  const sugg = new Map();
+
+  async function suggest(id, { force = false } = {}) {
+    const n = app.items.get(id);
+    if (!n || !aiOn()) return;
+    const key = n.updated || "";
+    const cur = sugg.get(id);
+    if (!force && cur && cur.key === key) return;
+    sugg.set(id, { key, loading: true });
+    render();
+    try {
+      const r = await api.aiSuggest(id);
+      sugg.set(id, { key, tags: r.tags || [], lobe: r.lobe || null });
+    } catch (e) {
+      sugg.set(id, { key, error: String(e) });
+    }
+    if (app.selected === id) render();
+  }
+
+  function suggestionsHtml(n) {
+    if (!aiOn()) return "";
+    const s = sugg.get(n.id);
+    const wanted = !n.tags?.length || n.lobe === UNSORTED.id;
+    if (!s && !wanted) return "";
+    let body;
+    if (!s) body = `<button type="button" class="btn" data-act="suggest">Suggest tags and lobe</button>`;
+    else if (s.loading) body = `<div class="empty-note">Thinking…</div>`;
+    else if (s.error) body = `<div class="empty-note error-text">${esc(s.error)}</div>`;
+    else if (!s.tags.length && !s.lobe) body = `<div class="empty-note">No good match among existing tags.</div>`;
+    else body = `<div class="sugg-chips">
+        ${s.tags.map(t => `<button type="button" class="tag sugg" data-accept-tag="${esc(t)}" title="Add #${esc(t)}">+ #${esc(t)}</button>`).join("")}
+        ${s.lobe ? `<button type="button" class="tag sugg" data-accept-lobe="${esc(s.lobe)}" title="Move to this lobe"><span class="dot" style="background:${app.lobe.get(s.lobe)?.color}"></span>${esc(app.lobe.get(s.lobe)?.name || s.lobe)}</button>` : ""}
+      </div>
+      <div class="item-actions"><button type="button" class="btn" data-act="accept-all">Accept all <kbd>Ctrl Enter</kbd></button>
+        <button type="button" class="btn quiet" data-act="dismiss-sugg">Dismiss</button></div>`;
+    return `<section class="side-section" data-sec="sugg"><div class="side-label">${icon("tags", { size: 13 })}<span>Suggestions</span></div><div class="sugg-body">${body}</div></section>`;
+  }
+
+  async function acceptSuggestions(id, { tags, lobe }) {
+    const n = app.items.get(id);
+    const s = sugg.get(id);
+    const p = {};
+    if (tags?.length) p.tags = [...new Set([...(n.tags || []), ...tags])];
+    if (lobe) p.lobe = lobe;
+    if (s && !s.loading) {
+      s.tags = (s.tags || []).filter(t => !tags?.includes(t));
+      if (lobe) s.lobe = null;
+    }
+    if (Object.keys(p).length) await patch(p);
+    const left = sugg.get(id);
+    if (left && !left.tags?.length && !left.lobe) sugg.delete(id);
+    render();
+  }
 
   function linkRows(edges, withContext = false) {
     const self = app.selected;
@@ -107,6 +162,7 @@ export function initRightSidebar() {
           <button type="button" class="btn ${confirmDelete ? "danger" : "quiet"}" data-act="delete" title="Move to .trash">${icon("trash", { size: 14 })}${confirmDelete ? "Confirm" : ""}</button>
         </div>
       </div>
+      ${suggestionsHtml(n)}
       ${section("props", "Properties", "filters", null, propsHtml(n))}
       ${section("out", "Outgoing links", "outgoing", out.length, linkRows(out))}
       ${section("back", "Backlinks", "backlinks", back.length, linkRows(back, true))}
@@ -136,6 +192,9 @@ export function initRightSidebar() {
     const ou = e.target.closest("[data-open-url]");
     if (ou) { e.preventDefault(); openExternal(ou.dataset.openUrl); return; }
     else if (act === "refetch") api.refetchLink(n.id).then(() => app.reload()).catch(e => toast(`Couldn't refetch: ${e}`, "error"));
+    else if (act === "suggest") suggest(n.id, { force: true });
+    else if (act === "accept-all") { const s = sugg.get(n.id); if (s && !s.loading) acceptSuggestions(n.id, { tags: s.tags, lobe: s.lobe }); }
+    else if (act === "dismiss-sugg") { sugg.set(n.id, { key: n.updated || "", tags: [], lobe: null, dismissed: true }); render(); }
     else if (act === "delete") {
       if (!confirmDelete) {
         confirmDelete = true;
@@ -146,10 +205,20 @@ export function initRightSidebar() {
         deleteItem(n.id);
       }
     }
+    const at = e.target.closest("[data-accept-tag]");
+    if (at) { acceptSuggestions(n.id, { tags: [at.dataset.acceptTag] }); return; }
+    const al = e.target.closest("[data-accept-lobe]");
+    if (al) { acceptSuggestions(n.id, { lobe: al.dataset.acceptLobe }); return; }
     const untag = e.target.closest("[data-untag]");
     if (untag) patch({ tags: n.tags.filter(t => t !== untag.dataset.untag) });
     const r = e.target.closest(".item-row");
     if (r) app.select(r.dataset.id, { source: "sidebar" });
+  });
+  pane.addEventListener("contextmenu", e => {
+    const r = e.target.closest(".item-row");
+    if (!r) return;
+    e.preventDefault();
+    itemMenu(r.dataset.id, { x: e.clientX, y: e.clientY });
   });
   pane.addEventListener("dblclick", e => {
     const r = e.target.closest(".item-row");
@@ -187,7 +256,19 @@ export function initRightSidebar() {
   pane.addEventListener("focusout", () => setTimeout(() => { if (deferred) render(); }, 0));
 
   app.on("data", render);
-  app.on("select", () => { confirmDelete = false; render(); });
+  app.on("select", ({ id }) => {
+    confirmDelete = false;
+    render();
+    // Inbox items (no tags) get suggestions automatically; others on request
+    const n = app.items.get(id);
+    if (n && aiOn() && !n.tags?.length) suggest(id);
+  });
+  app.on("suggest", id => suggest(id, { force: true }));
+  app.on("accept-suggestions", () => {
+    const id = app.selected;
+    const s = sugg.get(id);
+    if (id && s && !s.loading && (s.tags?.length || s.lobe)) acceptSuggestions(id, { tags: s.tags, lobe: s.lobe });
+  });
   render();
   return { rect: () => pane.getBoundingClientRect() };
 }

@@ -12,6 +12,7 @@ import { prefs } from "../lib/prefs.js";
 import { toast } from "../shell/toast.js";
 import { status } from "../shell/statusbar.js";
 import { tabsApi } from "../shell/tabs.js";
+import { editorMenu, itemMenu } from "../ai/actions.js";
 
 md.resolveWikilink = target => app.resolve(target);
 
@@ -171,6 +172,9 @@ export function itemTab(pane, tab) {
     if (a) { e.preventDefault(); openExternal(a.getAttribute("href")); }
   });
 
+  editorBox.addEventListener("contextmenu", e => { e.preventDefault(); editorMenu(tab, { x: e.clientX, y: e.clientY }); });
+  reading.addEventListener("contextmenu", e => { e.preventDefault(); itemMenu(tab.id, { x: e.clientX, y: e.clientY }); });
+
   applyMode();
 
   return {
@@ -197,6 +201,11 @@ export function itemTab(pane, tab) {
     toggleMode: () => setMode(mode === "edit" ? "read" : "edit"),
     focus: () => (mode === "edit" ? editor.focus() : null),
     save,
+    selection() {
+      if (mode !== "edit") return null;
+      const { from, to } = editor.view.state.selection.main;
+      return { from, to, text: editor.view.state.sliceDoc(from, to) };
+    },
     destroy() { save().then(() => editor.destroy()); },
   };
 }

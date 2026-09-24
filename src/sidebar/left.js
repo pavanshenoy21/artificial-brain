@@ -5,6 +5,7 @@ import { left } from "../shell/layout.js";
 import { icon, typeIcon } from "../icons.js";
 import { TYPES } from "../lib/types.js";
 import { UNSORTED } from "../lib/lobes.js";
+import { itemMenu } from "../ai/actions.js";
 import { esc } from "../util.js";
 import { prefs } from "../lib/prefs.js";
 
@@ -173,6 +174,14 @@ export function initLeftSidebar({ graph }) {
       app.emit("show-graph");
       graph.focusLobe(app.lobe.get(l.dataset.lobe));
     }
+  });
+
+  // right-click on any item row in the left sidebar
+  document.getElementById("left").addEventListener("contextmenu", e => {
+    const r = e.target.closest(".item-row");
+    if (!r) return;
+    e.preventDefault();
+    itemMenu(r.dataset.id, { x: e.clientX, y: e.clientY });
   });
 
   function renderAll() { renderFiles(); renderTags(); renderInbox(); renderFilters(); }

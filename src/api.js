@@ -43,6 +43,11 @@ function tauriBackend() {
     semanticSearch: (query, limit = 20) => call("semantic_search", { query, limit }), // [{ id, score }]
     embedStatus: () => call("embed_status"),                  // { state, done, total, message }
     embedAll: () => call("embed_all"),
+    aiPolish: text => call("ai_polish", { text }),
+    aiSummarize: text => call("ai_summarize", { text }),
+    aiFillForm: (kind, text) => call("ai_fill_form", { kind, text }),  // { field: value }
+    aiSuggest: id => call("ai_suggest", { id }),              // { tags, lobe }
+    aiApply: (id, patch) => call("ai_apply", { id, patch }),   // keeps the original in .brain/history
     githubSync: () => call("github_sync"),                    // { total, created, updated, last_sync }
     githubStatus: () => call("github_status"),                // { configured, last_sync }
     githubTest: settings => call("github_test", { settings }),

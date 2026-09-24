@@ -41,6 +41,8 @@ export function createMockBackend({ seed = true } = {}) {
   const items = new Map();
   let lobes = LOBES.map(l => ({ ...l }));
   let settings = structuredClone(DEFAULT_SETTINGS);
+  const history = [];   // originals kept by AI actions (.brain/history in the real app)
+  const needAi = () => { if (!settings.ai.provider) throw new Error("No AI provider set up (Settings → AI provider)."); };
   const listeners = new Set();
   const emit = kind => listeners.forEach(fn => fn({ kind }));
   const eventListeners = new Map();
@@ -269,6 +271,41 @@ export function createMockBackend({ seed = true } = {}) {
       return { state: settings.embed.base_url ? "idle" : "off", done: 0, total: 0, message: "" };
     },
     async embedAll() {},
+    // Fake AI for the browser preview (enabled when a provider is picked in
+    // Settings): deterministic, never adds facts, good enough to exercise the UI.
+    async aiPolish(text) {
+      needAi();
+      return text.replace(/[ \t]{2,}/g, " ").replace(/\bteh\b/g, "the").replace(/(^|[.!?]\s+)([a-z])/g, (m, a, b) => a + b.toUpperCase());
+    },
+    async aiSummarize(text) {
+      needAi();
+      const plain = text.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, t, a) => a || t).replace(/\s+/g, " ").trim();
+      return (plain.match(/^.*?[.!?](\s|$)/) || [plain])[0].trim();
+    },
+    async aiFillForm(kind, text) {
+      needAi();
+      const out = {};
+      const date = text.match(/\b(20\d\d-\d\d-\d\d)\b/);
+      if (kind === "hackathon" && date) out.date = date[1];
+      const level = text.match(/\b(beginner|intermediate|advanced)\b/i);
+      if (kind === "skill" && level) out.level = level[1].toLowerCase();
+      const stack = [...new Set((text.match(/\b(Rust|Python|JavaScript|Tauri|Docker|React|Flask|C\+\+)\b/g) || []))];
+      if ((kind === "hackathon" || kind === "project") && stack.length) out.stack = stack;
+      return out;
+    },
+    async aiSuggest(id) {
+      needAi();
+      const it = items.get(id);
+      const words = new Set(`${it.title} ${it.body}`.toLowerCase().split(/[^\p{L}\p{N}+#-]+/u));
+      const all = [...new Set([...items.values()].flatMap(x => x.tags))];
+      const tags = all.filter(t => words.has(t) && !it.tags.includes(t)).slice(0, 3);
+      const lobe = lobes.find(l => l.name.toLowerCase().split(/[^a-z]+/).some(w => w.length > 2 && words.has(w)))?.id || null;
+      return { tags, lobe: lobe === it.lobe ? null : lobe };
+    },
+    async aiApply(id, patch) {
+      history.push(clone(items.get(id)));
+      return api.updateItem(id, patch);
+    },
     async githubSync() {
       throw new Error("GitHub sync needs the desktop app (browser preview makes no network calls)");
     },
