@@ -15,11 +15,15 @@ import { travel } from "./travel.js";
 import { typeIcon } from "./icons.js";
 import { esc, reduceMotion } from "./util.js";
 import { prefs } from "./lib/prefs.js";
+import { initEmptyState } from "./shell/empty.js";
 
 // ------------------------------------------------------------------ tabs + graph
 let graph;
+let vaultInfo = null;
+let emptyState;
 tabs.register("graph", pane => {
   graph = createGraphView(pane);
+  emptyState = initEmptyState(pane, () => vaultInfo);
   return {};
 });
 tabs.register("item", itemTab);
@@ -109,9 +113,20 @@ window.addEventListener("keydown", e => {
 });
 
 // ------------------------------------------------------------------ start
-const info = await api.vaultInfo();
-status.set("vault", info.mock ? "browser preview" : info.path.split(/[\\/]/).filter(Boolean).pop(), info.path);
-await app.reload();
+function showVault(info) {
+  vaultInfo = info;
+  emptyState.render();
+  status.set("vault", info.mock ? "browser preview" : info.path.split(/[\\/]/).filter(Boolean).pop() || info.path, info.path);
+}
+app.on("vault", showVault);
+showVault(await api.vaultInfo());
+try {
+  await app.reload();
+} catch (e) {
+  console.error(e);
+  app.loaded = true;
+  app.emit("vault", { ...vaultInfo, error: vaultInfo.error || String(e) });
+}
 tabs.restore();
 
 // handy for poking around in devtools

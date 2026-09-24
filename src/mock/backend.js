@@ -6,7 +6,18 @@ import { LOBES, buildSampleGraph } from "../data/sample.js";
 import { TYPE } from "../lib/types.js";
 import { fileStem, linkIndex, renameWikilinks, resolve, wikilinks } from "../lib/wikilinks.js";
 
-const MANAGED = new Set(["id", "path", "created", "updated"]);
+const MANAGED = new Set(["id", "path", "created", "updated", "degree"]);
+const CORE = new Set(["id", "type", "lobe", "title", "tags", "body", "path", "created", "updated"]);
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Mirrors settings.rs defaults.
+export const DEFAULT_SETTINGS = {
+  vault: "", theme: "dark",
+  ai: { provider: "", base_url: "", model: "", api_key: "" },
+  embed: { base_url: "", model: "" },
+  github: { token: "", auto_sync: true },
+  shortcuts: { capture: "CommandOrControl+Shift+Space" },
+};
 const now = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
 let seq = 0;
 const newId = () => `m${Date.now().toString(36)}${(++seq).toString(36)}`;
@@ -14,6 +25,7 @@ const newId = () => `m${Date.now().toString(36)}${(++seq).toString(36)}`;
 export function createMockBackend({ seed = true } = {}) {
   const items = new Map();
   let lobes = LOBES.map(l => ({ ...l }));
+  let settings = structuredClone(DEFAULT_SETTINGS);
   const listeners = new Set();
   const emit = kind => listeners.forEach(fn => fn({ kind }));
 
@@ -130,8 +142,65 @@ export function createMockBackend({ seed = true } = {}) {
       emit("items");
       return idMap.size;
     },
+    async search(query, limit = 20) {
+      // Rough stand-in for the backend's FTS5 bm25: every word must prefix-match a word.
+      const words = query.toLowerCase().split(/[^\p{L}\p{N}_'-]+/u).filter(Boolean);
+      if (!words.length) return [];
+      const hits = [];
+      for (const it of items.values()) {
+        const fields = [
+          [it.title, 10], [it.tags.join(" "), 4], [it.body, 1],
+          [Object.entries(it).filter(([k]) => !CORE.has(k)).map(([, v]) => [].concat(v).join(" ")).join(" "), 0.5],
+        ].map(([t, w]) => [String(t || "").toLowerCase(), w]);
+        let score = 0;
+        const ok = words.every(w => {
+          let best = 0;
+          for (const [t, wt] of fields) if (new RegExp(`(^|[^\\p{L}\\p{N}])${escRe(w)}`, "u").test(t)) best = Math.max(best, wt);
+          score += best;
+          return best > 0;
+        });
+        if (!ok) continue;
+        const body = it.body || "";
+        const at = Math.max(0, body.toLowerCase().indexOf(words[0]));
+        const start = Math.max(0, at - 40);
+        let snippet = (start ? "…" : "") + body.slice(start, start + 120) + (start + 120 < body.length ? "…" : "");
+        snippet = snippet.replace(new RegExp(`(${words.map(escRe).join("|")})`, "gi"), "\u0001$1\u0002");
+        hits.push({ id: it.id, score, snippet });
+      }
+      return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+    },
+    async rebuildIndex() {
+      emit("items");
+      return { scanned: items.size, updated: items.size, removed: 0 };
+    },
+    async listLobes() {
+      return clone(lobes);
+    },
+    async saveLobes(next) {
+      const ids = new Set();
+      for (const l of next) {
+        if (!l.id?.trim() || !l.name?.trim()) throw new Error("every lobe needs an id and a name");
+        if (ids.has(l.id)) throw new Error(`duplicate lobe id "${l.id}"`);
+        ids.add(l.id);
+      }
+      lobes = clone(next);
+      emit("lobes");
+    },
     async vaultInfo() {
-      return { path: "~/Brain (browser preview)", mock: true };
+      return { path: "~/Brain (browser preview)", items: items.size, error: null, mock: true };
+    },
+    async openVault() {
+      return api.vaultInfo();
+    },
+    async pickFolder() {
+      return null;
+    },
+    async getSettings() {
+      return clone(settings);
+    },
+    async saveSettings(next) {
+      settings = clone(next);
+      return clone(settings);
     },
     onChange(fn) {
       listeners.add(fn);

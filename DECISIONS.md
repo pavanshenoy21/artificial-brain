@@ -21,3 +21,16 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - Search travel: flat card, 260ms, straight ease-out line, any key/click skips it. It only runs when the graph tab is active; otherwise (or with Ctrl Enter) the result opens in a tab.
 - Clicking a node selects it (focus + right sidebar); double-click or Enter opens it in a tab (3d-force-graph has no dblclick, so two clicks within 400ms count).
 - Theme and UI layout live in `localStorage` (`brain.prefs`) for now; they move to `settings.json` in milestone 6 where it matters (theme).
+
+## Milestone 2: vault + index
+- Rust split into `vault.rs` (files), `index.rs` (SQLite), `store.rs` (service), `settings.rs`, `watch.rs`, `commands.rs`, `state.rs`, `error.rs`. AI/embed/capture/GitHub modules get added by their milestones.
+- File names are the title with only filesystem/wikilink-unsafe characters removed ("Writeup JWT none-alg bypass.md"), not a lowercase-hyphen slug: Obsidian resolves `[[Title]]` by file name, so this keeps links working when the vault is opened in Obsidian. `title:` is always written to frontmatter, so the exact title survives.
+- New ids are ULIDs (`ulid` crate); files without an `id:` keep their path as id (never rewritten behind the user's back).
+- A type change moves the file into the new type's folder.
+- FTS5 is part of rusqlite's bundled SQLite. Query = each word quoted + prefix-matched, ANDed; bm25 weights title 10, tags 4, body 1, other fields 0.5. Snippet markers are \u0001/\u0002 so the UI can escape first, then highlight.
+- The index remembers which vault it belongs to; opening another vault clears it and re-syncs (one `brain.db` per install is enough).
+- File watcher: `notify-debouncer-mini`, 400ms. It ignores dot-folders except `.brain/lobes.json`; own writes cause a harmless no-op sync (mtime+size unchanged).
+- Commands are `async` so a big sync/rebuild never blocks the UI thread; every write emits `vault-changed`.
+- A vault that can't be opened doesn't crash the app: the error is shown in the empty state with "Open another folder".
+- Settings: secrets are sent to the UI as a `__saved__` marker and only replaced if the user types a new value.
+- `load_graph`/`graph.json` removed; `get_graph` returns `{ nodes, links, lobes }`.
