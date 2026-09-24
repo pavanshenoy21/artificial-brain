@@ -116,3 +116,49 @@ fn embedding_worker_fills_vectors_and_similar_links() {
     assert_eq!(state.with_store(|s| s.index.embedding_hashes("default")).unwrap(), before);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Fake GitHub API: two pages of repos, languages and a README.
+fn fake_github() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for sock in listener.incoming() {
+            let Ok(mut sock) = sock else { continue };
+            let mut buf = vec![0u8; 65536];
+            let n = sock.read(&mut buf).unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+            let authed = req.to_lowercase().contains("authorization: bearer good-token");
+            let (status, body) = if !authed {
+                ("401 Unauthorized", json!({ "message": "Bad credentials" }).to_string())
+            } else if path.starts_with("/user/repos") && path.contains("page=1&") {
+                let repos: Vec<Value> = (0..100).map(|i| json!({ "full_name": format!("p/r{i}"), "name": format!("r{i}"), "html_url": format!("https://github.com/p/r{i}"), "fork": i > 0 })).collect();
+                ("200 OK", Value::Array(repos).to_string())
+            } else if path.starts_with("/user/repos") && path.contains("page=2&") {
+                ("200 OK", json!([{ "full_name": "p/last", "name": "last", "html_url": "https://github.com/p/last", "topics": ["t"], "stargazers_count": 5 }]).to_string())
+            } else if path.ends_with("/languages") {
+                ("200 OK", json!({ "JavaScript": 10, "Rust": 500 }).to_string())
+            } else if path == "/repos/p/last/readme" {
+                ("200 OK", "# Last repo".to_string())
+            } else {
+                ("404 Not Found", json!({ "message": "Not Found" }).to_string())
+            };
+            let _ = sock.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes());
+        }
+    });
+    base
+}
+
+#[test]
+fn github_fetch_paginates_and_reads_languages_and_readme() {
+    let api = fake_github();
+    let repos = tauri::async_runtime::block_on(crate::github::fetch_repos(&api, "good-token", |_, _| {})).unwrap();
+    assert_eq!(repos.len(), 101, "two pages");
+    let last = repos.iter().find(|r| r.name == "last").unwrap();
+    assert_eq!(last.languages, vec!["Rust", "JavaScript"], "sorted by bytes");
+    assert_eq!(last.readme.as_deref(), Some("# Last repo"));
+    assert_eq!((last.stars, last.topics.clone()), (5, vec!["t".to_string()]));
+    assert_eq!(repos.iter().filter(|r| !r.fork).count(), 2);
+    let e = tauri::async_runtime::block_on(crate::github::whoami(&api, "bad")).unwrap_err();
+    assert!(e.to_string().contains("401"));
+}

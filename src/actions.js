@@ -67,3 +67,17 @@ export async function deleteItem(id) {
     toast(`Delete failed: ${e}`, "error");
   }
 }
+
+export async function syncGithub() {
+  toast("Syncing GitHub…");
+  try {
+    const r = await api.githubSync();
+    await app.reload();
+    app.emit("github", r);
+    toast(`GitHub: ${r.total} repos, ${r.created} new, ${r.updated} updated`);
+    return r;
+  } catch (e) {
+    toast(String(e), "error");
+    return null;
+  }
+}

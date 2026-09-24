@@ -12,3 +12,4 @@
 - Embeddings: run a second server with an embedding model, e.g.
   `llama-server -m nomic-embed-text-v1.5.Q8_0.gguf --embedding --port 8081`, set the URL in Settings, then "Embed everything now".
   If suggested links look too many/few, tune "Minimum similarity" (it depends on the model).
+- GitHub: create a fine-grained token (github.com → Settings → Developer settings → Fine-grained tokens), repository access "All repositories" (or pick), permissions Contents: read and Metadata: read. Paste it in Settings → GitHub, "Test token", then "Sync now".

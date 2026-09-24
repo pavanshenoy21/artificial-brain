@@ -36,3 +36,15 @@ test("search: prefix AND match, title first, snippet markers", async () => {
   assert.ok(body[0].snippet.includes("\u0001nginx\u0002"));
   assert.deepEqual(await api.search("   "), []);
 });
+
+test("frontmatter [[links]] (used_in) become graph links and follow renames", async () => {
+  const api = createMockBackend({ seed: false });
+  const p = await api.createItem({ type: "project", title: "Brain" });
+  const s = await api.createItem({ type: "skill", title: "Rust", used_in: ["[[Brain]]"] });
+  let g = await api.loadGraph();
+  assert.deepEqual(g.links, [{ source: s.id, target: p.id, kind: "explicit" }]);
+  await api.updateItem(p.id, { title: "Artificial Brain" });
+  assert.deepEqual((await api.getItem(s.id)).used_in, ["[[Artificial Brain]]"]);
+  g = await api.loadGraph();
+  assert.equal(g.links.length, 1);
+});

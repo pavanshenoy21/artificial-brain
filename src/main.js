@@ -165,6 +165,22 @@ showVault(await api.vaultInfo());
 app.settings = await api.getSettings().catch(() => null);
 if (app.settings?.theme && app.settings.theme !== document.documentElement.dataset.theme) applyTheme(app.settings.theme);
 showAi(app.settings);
+
+// status bar: when GitHub projects were last synced
+const ago = iso => {
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+};
+async function showGithub() {
+  const g = await api.githubStatus().catch(() => null);
+  if (g?.configured) status.set("github", g.last_sync ? `GitHub synced ${ago(g.last_sync)}` : "GitHub not synced yet", g.last_sync || "");
+  else status.set("github", "");
+}
+app.on("github", showGithub);
+app.on("settings", showGithub);
+api.on("github-progress", p => status.set("github", `GitHub ${p.done}/${p.total}`));
+api.on("github-error", msg => { status.set("github", "GitHub sync failed", msg); });
+showGithub();
 try {
   await app.reload();
 } catch (e) {

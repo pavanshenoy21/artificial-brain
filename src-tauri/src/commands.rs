@@ -185,6 +185,12 @@ pub struct TestResult {
     message: String,
 }
 
+impl TestResult {
+    pub fn new(ok: bool, message: String) -> Self {
+        TestResult { ok, message }
+    }
+}
+
 /// Tries the (possibly unsaved) AI settings with a tiny request.
 #[tauri::command]
 pub async fn test_ai(state: State<'_, AppState>, settings: Settings) -> Cmd<TestResult> {

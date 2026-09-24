@@ -77,8 +77,10 @@ export function createMockBackend({ seed = true } = {}) {
     const idx = linkIndex(all);
     const out = [];
     const seen = new Set();
+    // links in the body and in frontmatter values (e.g. used_in: ["[[Project]]"]), like index.rs
+    const fieldText = it => Object.entries(it).filter(([k]) => !CORE.has(k)).map(([, v]) => [].concat(v).filter(x => typeof x === "string").join("\n")).join("\n");
     for (const it of all)
-      for (const t of wikilinks(it.body)) {
+      for (const t of [...wikilinks(it.body), ...wikilinks(fieldText(it))]) {
         const target = resolve(idx, t);
         const key = `${it.id}|${target}`;
         if (target && target !== it.id && !seen.has(key)) {
@@ -119,10 +121,15 @@ export function createMockBackend({ seed = true } = {}) {
       if (item.title !== oldTitle && fileStem(item.title) !== oldStem) {
         item.path = uniquePath(item.type, item.title, id);
         const newStem = item.path.split("/").pop().replace(/\.md$/, "");
+        const rn = t => {
+          let b = renameWikilinks(t, oldStem, newStem);
+          return oldTitle !== oldStem ? renameWikilinks(b, oldTitle, newStem) : b;
+        };
         for (const other of items.values()) {
-          let b = renameWikilinks(other.body, oldStem, newStem);
-          if (oldTitle !== oldStem) b = renameWikilinks(b, oldTitle, newStem);
-          other.body = b;
+          other.body = rn(other.body);
+          for (const [k, v] of Object.entries(other))
+            if (!CORE.has(k) && Array.isArray(v)) other[k] = v.map(x => (typeof x === "string" ? rn(x) : x));
+            else if (!CORE.has(k) && typeof v === "string") other[k] = rn(v);
         }
       }
       emit("items");
@@ -262,6 +269,15 @@ export function createMockBackend({ seed = true } = {}) {
       return { state: settings.embed.base_url ? "idle" : "off", done: 0, total: 0, message: "" };
     },
     async embedAll() {},
+    async githubSync() {
+      throw new Error("GitHub sync needs the desktop app (browser preview makes no network calls)");
+    },
+    async githubStatus() {
+      return { configured: !!settings.github.token, last_sync: null };
+    },
+    async githubTest() {
+      return { ok: false, message: "Browser preview: no network calls. Test this in the desktop app." };
+    },
     on(event, fn) {
       if (event === "vault-changed") return api.onChange(fn);
       if (!eventListeners.has(event)) eventListeners.set(event, new Set());

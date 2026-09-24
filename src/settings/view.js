@@ -7,7 +7,7 @@ import { api, isDesktop } from "../api.js";
 import { icon } from "../icons.js";
 import { esc } from "../util.js";
 import { toast } from "../shell/toast.js";
-import { openVaultFolder, rebuildIndex } from "../actions.js";
+import { openVaultFolder, rebuildIndex, syncGithub } from "../actions.js";
 
 const SECRET = "__saved__";
 
@@ -86,7 +86,8 @@ export function settingsTab(pane) {
       <p class="set-desc">A fine-grained personal access token with read-only access to your repositories (Contents and Metadata: read).</p>
       ${row("Token", "", secret("github.token", s.github.token, "github_pat_…"))}
       ${row("Sync on startup", "When the last sync is more than a day old.", `<input type="checkbox" data-path="github.auto_sync" ${s.github.auto_sync ? "checked" : ""} />`)}
-      <div data-slot="github"></div>
+      ${row("", "", `<button type="button" class="btn" data-act="test-github">Test token</button>
+        <button type="button" class="btn" data-act="sync-github">Sync now</button><span class="set-result" data-result="github"></span>`)}
 
       <h2>Shortcuts</h2>
       ${row("Quick capture", "Global shortcut. On GNOME Wayland, bind <code>brain --capture</code> as a custom shortcut instead.",
@@ -200,6 +201,19 @@ export function settingsTab(pane) {
       const r = await (k === "ai" ? api.testAi(current()) : api.testEmbed(current())).catch(err => ({ ok: false, message: String(err) }));
       result(k).textContent = r.message;
       result(k).className = `set-result ${r.ok ? "ok" : "error"}`;
+    }
+    if (act === "test-github") {
+      result("github").textContent = "Testing…";
+      const r = await api.githubTest(current()).catch(err => ({ ok: false, message: String(err) }));
+      result("github").textContent = r.message;
+      result("github").className = `set-result ${r.ok ? "ok" : "error"}`;
+    }
+    if (act === "sync-github") {
+      const r = await syncGithub();
+      if (r) {
+        result("github").textContent = `Synced ${r.total} repos: ${r.created} new, ${r.updated} updated.`;
+        result("github").className = "set-result ok";
+      }
     }
     if (act === "embed-all") {
       await api.embedAll();

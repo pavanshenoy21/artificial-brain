@@ -268,16 +268,20 @@ pub fn remove_path(db: &Connection, path: &str) -> Result<()> {
 /// Recomputes explicit links from [[wikilinks]] in every body. Targets match
 /// case-insensitively by file name, vault-relative path or title.
 pub fn rebuild_links(db: &Connection) -> Result<()> {
-    let rows: Vec<(String, String, String, String)> = {
-        let mut stmt = db.prepare("SELECT id, path, title, body FROM items")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+    let rows: Vec<(String, String, String, String, String)> = {
+        let mut stmt = db.prepare("SELECT id, path, title, body, fields FROM items")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-    let lookup = link_lookup(rows.iter().map(|(id, path, title, _)| (id.as_str(), path.as_str(), title.as_str())));
+    let lookup = link_lookup(rows.iter().map(|(id, path, title, _, _)| (id.as_str(), path.as_str(), title.as_str())));
     db.execute("DELETE FROM links WHERE kind = 'explicit'", [])?;
     let mut stmt = db.prepare("INSERT OR IGNORE INTO links (src, dst, kind) VALUES (?1, ?2, 'explicit')")?;
-    for (id, _, _, body) in &rows {
-        for target in md::wikilinks(body) {
+    for (id, _, _, body, fields) in &rows {
+        // links in the body, plus links in frontmatter values (e.g. used_in: ["[[Hackemon]]"])
+        let fields: Value = serde_json::from_str(fields).unwrap_or(Value::Null);
+        let mut targets = md::wikilinks(body);
+        targets.extend(md::wikilinks(&extra_text_value(&fields)));
+        for target in targets {
             if let Some(t) = resolve(&lookup, &target) {
                 if t != id {
                     stmt.execute(params![id, t])?;
@@ -286,6 +290,13 @@ pub fn rebuild_links(db: &Connection) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn extra_text_value(v: &Value) -> String {
+    match v {
+        Value::Object(o) => extra_text(o),
+        _ => String::new(),
+    }
 }
 
 /// lowercase title / file stem / path (no .md) -> id. Titles go in first so
@@ -416,6 +427,15 @@ mod tests {
         assert_eq!(idx.embedding_hashes("m").unwrap().len(), 1, "rebuild keeps vectors");
         idx.clear(true).unwrap();
         assert!(idx.embedding_hashes("m").unwrap().is_empty());
+    }
+
+    #[test]
+    fn frontmatter_links_count() {
+        let mut idx = Index::memory().unwrap();
+        add(&mut idx, "skills/Rust.md", "---\nid: s\nused_in: ['[[Brain]]', '[[Missing]]']\n---\n");
+        add(&mut idx, "projects/Brain.md", "---\nid: p\n---\n");
+        let links = idx.links().unwrap();
+        assert_eq!(links.iter().map(|l| (l.source.as_str(), l.target.as_str())).collect::<Vec<_>>(), vec![("s", "p")]);
     }
 
     #[test]

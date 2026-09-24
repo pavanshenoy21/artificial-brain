@@ -5,7 +5,8 @@ import { app } from "../state.js";
 import { api } from "../api.js";
 import { right } from "../shell/layout.js";
 import { icon, typeIcon } from "../icons.js";
-import { FIELDS, TYPE, TYPES } from "../lib/types.js";
+import { FORMS, TYPE, TYPES } from "../lib/types.js";
+import { fieldControl, readValue, bindLinkInputs } from "../forms/fields.js";
 import { UNSORTED } from "../lib/lobes.js";
 import { esc, openExternal } from "../util.js";
 import { eachWikilink, linkTarget } from "../lib/wikilinks.js";
@@ -14,9 +15,6 @@ import { toast } from "../shell/toast.js";
 
 const KNOWN = new Set(["id", "type", "lobe", "title", "tags", "body", "path", "created", "updated", "degree"]);
 const LAYOUT = /^(x|y|z|vx|vy|vz|fx|fy|fz|index|__.*)$/;
-const LIST_FIELDS = new Set(["stack", "languages", "topics", "used_in"]);
-
-const asText = v => (Array.isArray(v) ? v.join(", ") : v && typeof v === "object" ? JSON.stringify(v) : v ?? "");
 const unwiki = s => s.replace(/!?\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_, t, a) => a || t.split("#")[0]);
 
 // The first line of `src`'s body that links to `targetId`.
@@ -61,8 +59,12 @@ export function initRightSidebar() {
 
   function propsHtml(n) {
     const lobes = [...app.lobes, app.lobe.get(UNSORTED.id)];
-    const fields = [...new Set([...(FIELDS[n.type] || []), ...Object.keys(n).filter(k => !KNOWN.has(k) && !LAYOUT.test(k))])];
+    const form = FORMS[n.type] || [];
+    const known = new Set(form.map(f => f.key));
+    // frontmatter keys the form doesn't know (hand-written, or from another type) stay editable as text
+    const extra = Object.keys(n).filter(k => !KNOWN.has(k) && !LAYOUT.test(k) && !known.has(k) && k !== "error");
     const allTags = [...new Set([...app.items.values()].flatMap(x => x.tags || []))].sort();
+    const synced = n.type === "project" && !!n.pushed_at;
     return `<div class="props-form">
       <label class="prop"><span>type</span><select data-prop="type">${TYPES.map(t => `<option value="${t.id}" ${t.id === n.type ? "selected" : ""}>${t.one}</option>`).join("")}</select></label>
       <label class="prop"><span>lobe</span><select data-prop="lobe">${lobes.map(l => `<option value="${esc(l.id)}" ${l.id === n.lobe ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
@@ -71,14 +73,9 @@ export function initRightSidebar() {
         <input data-tag-input list="all-tags" placeholder="${n.tags?.length ? "" : "add tag"}" spellcheck="false" />
         <datalist id="all-tags">${allTags.map(t => `<option value="${esc(t)}"></option>`).join("")}</datalist>
       </div></div>
-      ${fields.map(k => {
-        const v = n[k];
-        const long = typeof v === "string" && v.length > 60 || k === "summary" || k === "description" || k === "built";
-        return `<label class="prop"><span>${esc(k.replace(/_/g, " "))}</span>${long
-          ? `<textarea data-field="${esc(k)}" rows="2" spellcheck="false">${esc(asText(v))}</textarea>`
-          : `<input data-field="${esc(k)}" value="${esc(asText(v))}" spellcheck="false" />`}
-          ${k === "url" && v ? `<button type="button" class="icon-btn" data-act="url" title="Open in browser">${icon("external", { size: 13 })}</button>` : ""}</label>`;
-      }).join("")}
+      ${form.map(f => fieldControl(f, n[f.key], { github: synced })).join("")}
+      ${extra.map(k => fieldControl({ key: k, kind: Array.isArray(n[k]) ? "list" : typeof n[k] === "number" ? "number" : "text" }, n[k])).join("")}
+      ${synced ? `<div class="prop-note">Grey fields come from GitHub and are updated on sync.</div>` : ""}
     </div>`;
   }
 
@@ -130,21 +127,14 @@ export function initRightSidebar() {
     }
   }
 
-  function fieldValue(k, raw) {
-    const text = raw.trim();
-    if (!text) return null;
-    const n = app.items.get(app.selected);
-    if (LIST_FIELDS.has(k) || Array.isArray(n?.[k])) return text.split(",").map(s => s.trim()).filter(Boolean);
-    if (typeof n?.[k] === "number" && !isNaN(+text)) return +text;
-    return text;
-  }
-
   pane.addEventListener("click", e => {
     const act = e.target.closest("[data-act]")?.dataset.act;
     const n = app.items.get(app.selected);
     if (!n) return;
     if (act === "open") app.open(n.id);
     else if (act === "url") openExternal(n.url);
+    const ou = e.target.closest("[data-open-url]");
+    if (ou) { e.preventDefault(); openExternal(ou.dataset.openUrl); return; }
     else if (act === "refetch") api.refetchLink(n.id).then(() => app.reload()).catch(e => toast(`Couldn't refetch: ${e}`, "error"));
     else if (act === "delete") {
       if (!confirmDelete) {
@@ -171,8 +161,8 @@ export function initRightSidebar() {
     const el = e.target;
     if (el.dataset.prop === "type") patch({ type: el.value });
     else if (el.dataset.prop === "lobe") patch({ lobe: el.value === UNSORTED.id ? null : el.value });
-    else if (el.dataset.field) {
-      const v = fieldValue(el.dataset.field, el.value);
+    else if (el.dataset.field && !el.readOnly) {
+      const v = readValue(el);
       if (JSON.stringify(v) !== JSON.stringify(n[el.dataset.field] ?? null)) patch({ [el.dataset.field]: v });
     }
   });
@@ -190,9 +180,10 @@ export function initRightSidebar() {
         e.preventDefault();
         patch({ tags: n.tags.slice(0, -1) });
       }
-    } else if (el.tagName === "INPUT" && e.key === "Enter") el.blur();
+    } else if (el.tagName === "INPUT" && e.key === "Enter" && !el.dataset.linkInput) el.blur();
     if (e.key === "Escape" && /INPUT|TEXTAREA/.test(el.tagName)) { el.blur(); render(); }
   });
+  bindLinkInputs(pane, (key, list) => patch({ [key]: list.length ? list.map(t => `[[${t}]]`) : null }));
   pane.addEventListener("focusout", () => setTimeout(() => { if (deferred) render(); }, 0));
 
   app.on("data", render);

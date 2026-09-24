@@ -80,3 +80,15 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - Theme lives in settings.json; a copy in localStorage only avoids a flash of the wrong theme on start.
 - Changing the capture shortcut re-registers it immediately.
 - Integration test uses Tauri's mock runtime and a loopback fake embedding server; embed functions are generic over `Runtime` for that.
+
+## Milestone 7: forms + GitHub sync
+- Form schemas live in `lib/types.js` (`FORMS`), one list of fields per type with a control kind (select, date, textarea, list, links, url, number). The same controls render in the properties pane and in the "New …" dialog (`forms/fields.js`).
+- Notes skip the dialog (Ctrl N opens the editor straight away); skills, hackathons, projects and links get the dialog. "New link" goes through the capture pipeline so it's fetched and summarised.
+- `used_in` stores `[[Project]]` strings in frontmatter (Obsidian renders those as links in properties). Wikilinks in frontmatter values now count as graph links too, and renames rewrite them (the Rust side already rewrote the whole file; the mock now does too).
+- Unknown frontmatter keys stay visible and editable as text, so hand-written properties aren't hidden.
+- Skill levels and project statuses are fixed option lists (lowercase); the sample data was normalised to them.
+- GitHub sync (`github.rs`): `/user/repos` (owner + collaborator, paginated), `/languages` (sorted by bytes), `/readme` (raw, 3000 chars). Forks are skipped unless already tracked. Projects match by `repo` URL/owner-name, so a renamed project item still syncs.
+- GitHub owns: repo, description, languages, topics, stars, pushed_at (read-only in the UI, marked "from GitHub"). Never touched after creation: title, body, status, role, stack, lobe, tags. The README goes into the body once, at creation, under "README (from GitHub)", so it's searchable and embeddable; after that the body is the user's.
+- New projects start with status active (archived repos: archived). Unchanged repos cause no file write.
+- Last sync time is stored in the index's meta table; auto-sync on startup when enabled and older than 24h. Progress and errors show in the status bar.
+- The GitHub API base is a parameter so tests run against a loopback fake GitHub (pagination, languages, README, 401).

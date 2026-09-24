@@ -8,11 +8,45 @@ export const TYPES = [
 ];
 export const TYPE = Object.fromEntries(TYPES.map(t => [t.id, t]));
 
-// Fields shown in the properties pane, per type (forms come in milestone 7).
-export const FIELDS = {
+// Form schema per type: fields written to frontmatter (the body stays free markdown).
+// kind: text | textarea | select | date | number | url | list (comma-separated) | links ([[wikilinks]] to items)
+// github: overwritten by GitHub sync (shown read-only); readonly: set by the app.
+export const FORMS = {
   note: [],
-  link: ["url", "site", "summary", "fetched", "status"],
-  skill: ["level", "since", "used_in"],
-  hackathon: ["date", "location", "role", "team", "built", "stack", "result", "repo"],
-  project: ["repo", "description", "languages", "topics", "stars", "pushed_at", "status", "role", "stack"],
+  link: [
+    { key: "url", kind: "url", label: "URL" },
+    { key: "site", kind: "text" },
+    { key: "summary", kind: "textarea" },
+    { key: "status", kind: "text", readonly: true },
+    { key: "fetched", kind: "text", readonly: true },
+  ],
+  skill: [
+    { key: "level", kind: "select", options: ["beginner", "intermediate", "advanced"] },
+    { key: "since", kind: "text", placeholder: "2025 or 2025-08" },
+    { key: "used_in", kind: "links", label: "Used in", linkType: "project" },
+  ],
+  hackathon: [
+    { key: "date", kind: "date" },
+    { key: "location", kind: "text" },
+    { key: "role", kind: "text", suggestions: ["Participant", "Builder", "Team lead", "Organizer", "Mentor", "Judge"] },
+    { key: "team", kind: "list", placeholder: "names, comma-separated" },
+    { key: "built", kind: "textarea", label: "What we built" },
+    { key: "stack", kind: "list", placeholder: "Rust, Tauri, …" },
+    { key: "result", kind: "text", placeholder: "Winner, finalist, …" },
+    { key: "repo", kind: "url" },
+  ],
+  project: [
+    { key: "status", kind: "select", options: ["idea", "active", "paused", "shipped", "archived"] },
+    { key: "role", kind: "text" },
+    { key: "stack", kind: "list" },
+    { key: "repo", kind: "url", github: true },
+    { key: "description", kind: "textarea", github: true },
+    { key: "languages", kind: "list", github: true },
+    { key: "topics", kind: "list", github: true },
+    { key: "stars", kind: "number", github: true },
+    { key: "pushed_at", kind: "text", label: "Last push", github: true },
+  ],
 };
+
+// Keys the forms know about, per type (other frontmatter keys are still shown).
+export const FIELDS = Object.fromEntries(Object.entries(FORMS).map(([t, f]) => [t, f.map(x => x.key)]));

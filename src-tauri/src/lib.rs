@@ -4,6 +4,7 @@ mod commands;
 mod embed;
 mod enrich;
 mod error;
+mod github;
 mod index;
 mod markdown;
 mod settings;
@@ -72,6 +73,7 @@ pub fn run() {
                 }
             }
             embed::backfill(app.handle());
+            github::auto_sync(app.handle());
             if std::env::args().any(|a| a == "--capture") {
                 let _ = capture::show_window(app.handle());
             }
@@ -102,6 +104,9 @@ pub fn run() {
             embed::semantic_search,
             embed::embed_status,
             embed::embed_all,
+            github::github_sync,
+            github::github_status,
+            github::github_test,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

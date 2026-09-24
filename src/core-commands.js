@@ -4,16 +4,19 @@
 import { registerCommand as reg } from "./palette/commands.js";
 import { app } from "./state.js";
 import { api, isDesktop } from "./api.js";
-import { newItem, importSample, openVaultFolder, rebuildIndex, deleteItem } from "./actions.js";
+import { newItem, importSample, openVaultFolder, rebuildIndex, deleteItem, syncGithub } from "./actions.js";
 import { TYPES } from "./lib/types.js";
 import { toast } from "./shell/toast.js";
+import { openNewDialog } from "./forms/new-dialog.js";
 
 export function registerCoreCommands({ graph, tabs, left, right, search, setTheme }) {
   const itemTab = () => (tabs.active?.kind === "item" ? tabs.active : null);
   const current = () => app.items.get(itemTab()?.id || app.selected);
 
+  // notes open straight in the editor; typed items get a form first
   for (const t of TYPES)
-    reg({ id: `new-${t.id}`, title: `New ${t.one.toLowerCase()}`, iconName: "plus", keys: t.id === "note" ? "Ctrl N" : undefined, run: () => newItem(t.id) });
+    reg({ id: `new-${t.id}`, title: `New ${t.one.toLowerCase()}`, iconName: "plus", keys: t.id === "note" ? "Ctrl N" : undefined,
+      run: () => (t.id === "note" ? newItem("note") : openNewDialog(t.id)) });
 
   reg({ id: "capture", title: "Quick capture", iconName: "capture", keys: "Ctrl Shift Space", run: () => api.openCapture() });
   reg({ id: "search", title: "Search", iconName: "search", keys: "Ctrl K", run: search });
@@ -41,6 +44,8 @@ export function registerCoreCommands({ graph, tabs, left, right, search, setThem
   } });
   reg({ id: "delete", title: "Delete current item (move to .trash)", iconName: "trash", when: () => !!current(), run: () => deleteItem(current().id) });
 
+  reg({ id: "sync-github", title: "Sync GitHub projects", iconName: "github",
+    disabled: () => (app.settings?.github?.token ? false : "Add a GitHub token in Settings"), run: syncGithub });
   reg({ id: "rebuild-index", title: "Rebuild index", iconName: "refresh", run: rebuildIndex });
   reg({ id: "reload", title: "Reload vault", iconName: "refresh", run: () => app.reload() });
   reg({ id: "import-sample", title: "Import sample data", iconName: "download", run: importSample });

@@ -313,3 +313,18 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .lobe-row .input { width: 260px; }
 .lobe-id { font: 11px var(--mono); width: 90px; overflow: hidden; text-overflow: ellipsis; }
 .lobe-row .count { width: 28px; text-align: right; }
+
+/* ---------------------------------------------------------------- forms + dialog */
+.prop-ro input, .prop-ro textarea, .prop-ro select { color: var(--muted); pointer-events: none; }
+.prop-note { color: var(--faint); font-size: 11.5px; padding: 4px 0 0 86px; }
+.link-chip { background: var(--bg-active); color: var(--text); }
+.dialog {
+  width: min(520px, calc(100vw - 32px)); background: var(--bg-raised); border: 1px solid var(--border-strong);
+  border-radius: 6px; box-shadow: var(--shadow-pop); display: flex; flex-direction: column; max-height: 80vh;
+}
+.dialog-head { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid var(--border); }
+.dialog-body { padding: 12px 16px; overflow: auto; }
+.dialog-body.props-form .prop { grid-template-columns: 100px 1fr auto; }
+.dialog-body .prop input, .dialog-body .prop select, .dialog-body .prop textarea { border-color: var(--border); background: var(--bg); }
+.dialog-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+.dialog-error { flex: 1; color: var(--danger); font-size: 12px; }

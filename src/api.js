@@ -43,6 +43,9 @@ function tauriBackend() {
     semanticSearch: (query, limit = 20) => call("semantic_search", { query, limit }), // [{ id, score }]
     embedStatus: () => call("embed_status"),                  // { state, done, total, message }
     embedAll: () => call("embed_all"),
+    githubSync: () => call("github_sync"),                    // { total, created, updated, last_sync }
+    githubStatus: () => call("github_status"),                // { configured, last_sync }
+    githubTest: settings => call("github_test", { settings }),
     on(event, fn) {
       let un;
       let dead = false;

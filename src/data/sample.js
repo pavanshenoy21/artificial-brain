@@ -23,7 +23,7 @@ function n(type, lobe, title, tags, fields = {}) {
 // ---------- Security & CTF ----------
 const ctfChecklist = n("note", "sec", "CTF challenge design checklist", ["ctf", "challenge-design"], { body: "Every challenge needs: an intended path, a tested solve script, a flag format check, and a note on unintended solutions. Difficulty should come from the idea, not from guessing." });
 const ctfdNotes    = n("note", "sec", "CTFd deployment notes", ["ctf", "docker", "infra"], { body: "Run CTFd behind nginx with docker compose. Keep uploads on a volume. Back up the database before every event." });
-const hackemon     = n("project", "sec", "Hackemon", ["ctf", "infra", "docker"], { repo: "github.com/…/hackemon", stack: ["Docker", "CTFd", "Python"], status: "Active" });
+const hackemon     = n("project", "sec", "Hackemon", ["ctf", "infra", "docker"], { repo: "github.com/…/hackemon", stack: ["Docker", "CTFd", "Python"], status: "active" });
 const webExploit   = n("skill", "sec", "Web exploitation (XSS, SQLi)", ["ctf", "web-security"], { level: "intermediate" });
 const privesc      = n("skill", "sec", "Linux privilege escalation", ["ctf", "linux"], { level: "beginner" });
 const portswigger  = n("link", "sec", "PortSwigger Web Security Academy", ["web-security", "learning"], { url: "https://portswigger.net/web-security", summary: "Free, hands-on labs for every major web vulnerability class." });
@@ -54,8 +54,8 @@ const cpAlgo     = n("link", "cp", "cp-algorithms.com", ["algorithms", "learning
 const dijkstra   = n("note", "cp", "Dijkstra notes", ["graphs", "algorithms"], { body: "Priority queue of (dist, node). Skip stale entries. Doesn't work with negative edges." });
 
 // ---------- Web & Apps ----------
-const showcase   = n("project", "web", "Club Showcase Website", ["web", "frontend"], { repo: "github.com/…/club-showcase", stack: ["HTML", "CSS", "JavaScript"], status: "Shipped" });
-const onevision  = n("project", "web", "OneVision", ["web", "ai", "mobile"], { repo: "github.com/…/onevision", stack: ["JavaScript", "Vision API"], status: "Hackathon build" });
+const showcase   = n("project", "web", "Club Showcase Website", ["web", "frontend"], { repo: "github.com/…/club-showcase", stack: ["HTML", "CSS", "JavaScript"], status: "shipped" });
+const onevision  = n("project", "web", "OneVision", ["web", "ai", "mobile"], { repo: "github.com/…/onevision", stack: ["JavaScript", "Vision API"], status: "shipped" });
 const htmlcss    = n("skill", "web", "HTML / CSS / JavaScript", ["frontend", "web"], { level: "intermediate" });
 const flask      = n("skill", "web", "Flask", ["backend", "python"], { level: "beginner" });
 const react      = n("skill", "web", "React (basics)", ["frontend"], { level: "beginner" });
@@ -69,8 +69,8 @@ const travelAnim = n("note", "web", "Search animation: file travels to the UI", 
 const refUI      = n("link", "web", "Refactoring UI", ["design", "learning"], { url: "https://www.refactoringui.com", summary: "Practical UI design tactics for developers." });
 
 // ---------- AI & ML ----------
-const ocr        = n("project", "ai", "OCR Pipeline (Industry 4.0 EL)", ["ocr", "python"], { repo: "github.com/…/ocr-pipeline", stack: ["Python", "Tesseract"], status: "In progress" });
-const jarvis     = n("project", "ai", "Jarvis (local life assistant)", ["llm", "rag"], { repo: "—", stack: ["llama.cpp", "Python"], status: "Planned" });
+const ocr        = n("project", "ai", "OCR Pipeline (Industry 4.0 EL)", ["ocr", "python"], { repo: "github.com/…/ocr-pipeline", stack: ["Python", "Tesseract"], status: "active" });
+const jarvis     = n("project", "ai", "Jarvis (local life assistant)", ["llm", "rag"], { repo: "—", stack: ["llama.cpp", "Python"], status: "idea" });
 const python     = n("skill", "ai", "Python", ["python"], { level: "intermediate" });
 const prompting  = n("skill", "ai", "Prompt engineering", ["llm"], { level: "intermediate" });
 const ragVsFt    = n("note", "ai", "RAG vs fine-tuning", ["llm", "rag"], { body: "Facts that change → RAG. Style or format → fine-tuning. For a personal brain, RAG over notes wins." });
@@ -95,7 +95,7 @@ const networking = n("skill", "sys", "Networking basics", ["networking"], { leve
 const sshTmux    = n("note", "sys", "SSH & tmux workflow", ["linux", "shell"], { body: "ssh config aliases, tmux sessions per project, detach instead of closing." });
 
 // ---------- College & Life ----------
-const ace        = n("project", "col", "Ace Designers BOM Accuracy", ["manufacturing", "team"], { repo: "—", stack: ["Python", "Excel"], status: "In progress" });
+const ace        = n("project", "col", "Ace Designers BOM Accuracy", ["manufacturing", "team"], { repo: "—", stack: ["Python", "Excel"], status: "active" });
 const sip        = n("note", "col", "SIP software report", ["sip", "report"], { body: "Everything used for the Student Induction Program: dashboard, attendance, ticketing, club showcase." });
 const club       = n("note", "col", "Coding Club ideas", ["club", "idea"], { body: "Monthly CTF night, CP ladder, project demo day." });
 const semPlan    = n("note", "col", "Semester plan", ["college", "planning"], { body: "Internals dates, lab submissions, EL milestones." });
