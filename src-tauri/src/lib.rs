@@ -1,4 +1,5 @@
 mod ai;
+mod ask;
 mod assist;
 mod capture;
 mod commands;
@@ -113,6 +114,7 @@ pub fn run() {
             assist::ai_fill_form,
             assist::ai_suggest,
             assist::ai_apply,
+            ask::ask,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

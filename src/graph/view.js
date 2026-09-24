@@ -237,6 +237,9 @@ export function createGraphView(container) {
     if (state.focus?.kind === "node") {
       const n = app.items.get(state.focus.node.id);
       if (n) { state.focus.node = n; state.levels = bfsLevels([n.id]); } else state.focus = null;
+    } else if (state.focus?.kind === "set") {
+      state.focus.ids = state.focus.ids.filter(id => app.items.has(id));
+      if (state.focus.ids.length) state.levels = bfsLevels(state.focus.ids, 1); else state.focus = null;
     }
     applyFocusVisuals();
   }
@@ -272,6 +275,7 @@ export function createGraphView(container) {
       const f = state.focus;
       bar.querySelector(".graph-focus-label").innerHTML = f.kind === "node"
         ? `${typeIcon(f.node.type, app.lobeOf(f.node).color, 12)}<b>${esc(f.node.title)}</b>`
+        : f.kind === "set" ? `<b>${esc(f.label || `${f.ids.length} items`)}</b>`
         : `<span class="dot" style="background:${f.lobe.color}"></span><b>${esc(f.lobe.name)}</b>`;
     }
   }
@@ -315,6 +319,24 @@ export function createGraphView(container) {
     Graph.cameraPosition(pos, fx.center.clone(), ms);
   }
 
+  // Light up a set of items (e.g. the notes an Ask answer cites) + their neighbours.
+  function highlight(ids, label = "") {
+    ids = ids.filter(id => app.items.has(id));
+    if (!ids.length) return;
+    const lv = bfsLevels(ids, 1);
+    state.focus = { kind: "set", ids, label };
+    state.levels = lv;
+    applyFocusVisuals();
+    pauseOrbit();
+    // fly to the centre of the set, far enough to see all of it
+    const nodes = ids.map(id => app.items.get(id));
+    const c = new THREE.Vector3();
+    for (const n of nodes) c.add(new THREE.Vector3(n.x, n.y, n.z));
+    c.divideScalar(nodes.length);
+    const r = Math.max(...nodes.map(n => c.distanceTo(new THREE.Vector3(n.x, n.y, n.z))));
+    flyTo({ x: c.x, y: c.y, z: c.z }, 700, Math.max(110, r * 3));
+  }
+
   function clearFocus() {
     if (!state.focus) return;
     state.focus = null;
@@ -353,7 +375,7 @@ export function createGraphView(container) {
       const v = n.__v;
       if (!v) continue;
       let show;
-      if (state.focus) show = level(n) <= (state.focus.kind === "node" ? 1 : far ? -1 : 1);
+      if (state.focus) show = level(n) <= (state.focus.kind === "node" ? 1 : state.focus.kind === "set" ? 0 : far ? -1 : 1);
       else show = !far && tmp.set(n.x, n.y, n.z).distanceTo(cam.position) < 160;
       if (n === state.hover) show = true;
       v.label.visible = show && state.types.has(n.type);
@@ -451,6 +473,7 @@ export function createGraphView(container) {
     setData,
     focusNode,
     focusLobe,
+    highlight,
     clearFocus,
     setViewMode,
     toggleView: () => setViewMode(!state.flat),

@@ -22,6 +22,7 @@ import { registerCoreCommands } from "./core-commands.js";
 import { settingsTab, PROVIDERS } from "./settings/view.js";
 import { setSemanticSearch } from "./palette/search.js";
 import { registerCommand } from "./palette/commands.js";
+import { initAsk } from "./ai/ask.js";
 
 // ------------------------------------------------------------------ tabs + graph
 let graph;
@@ -39,6 +40,7 @@ tabs.addGraph();
 
 const rightSide = initRightSidebar();
 initLeftSidebar({ graph });
+const ask = initAsk({ highlight: (ids, label) => { tabs.activate("graph"); graph.highlight(ids, label); } });
 
 // ------------------------------------------------------------------ selection / opening
 const graphActive = () => tabs.active?.kind === "graph";
@@ -96,6 +98,7 @@ ribbonButton({
 });
 ribbonButton({ iconName: "settings", title: "Settings", bottom: true, onClick: () => openSettings() });
 registerCommand({ id: "settings", title: "Open settings", iconName: "settings", run: () => openSettings() });
+registerCommand({ id: "ask", title: "Ask your notes", iconName: "ask", run: () => ask.focus() });
 
 // Theme: settings.json is the truth; prefs keep a copy so the first paint is right.
 function applyTheme(t) {

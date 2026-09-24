@@ -162,3 +162,67 @@ fn github_fetch_paginates_and_reads_languages_and_readme() {
     let e = tauri::async_runtime::block_on(crate::github::whoami(&api, "bad")).unwrap_err();
     assert!(e.to_string().contains("401"));
 }
+
+/// Chat server that answers every request with a fixed reply citing a note.
+fn fake_chat(reply: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for sock in listener.incoming() {
+            let Ok(mut sock) = sock else { continue };
+            let mut buf = vec![0u8; 1 << 20];
+            let mut req = Vec::new();
+            loop {
+                let n = sock.read(&mut buf).unwrap_or(0);
+                req.extend_from_slice(&buf[..n]);
+                let t = String::from_utf8_lossy(&req);
+                if let Some(end) = t.find("\r\n\r\n") {
+                    let len = t.lines().find_map(|l| l.to_lowercase().strip_prefix("content-length: ").map(|v| v.trim().parse::<usize>().unwrap())).unwrap_or(0);
+                    if req.len() >= end + 4 + len { break; }
+                }
+                if n == 0 { break; }
+            }
+            let out = json!({ "choices": [{ "message": { "content": reply } }] }).to_string();
+            let _ = sock.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len()).as_bytes());
+        }
+    });
+    base
+}
+
+#[test]
+fn ask_retrieves_expands_and_cites() {
+    let dir = std::env::temp_dir().join(format!("brain-ask-{}", crate::vault::new_id()));
+    let mut store = Store::open(dir.join("vault"), &dir.join("brain.db")).unwrap();
+    store.create(obj(json!({ "title": "Per-team containers", "body": "Spawn one container per team. See [[CTFd notes]]." }))).unwrap();
+    store.create(obj(json!({ "title": "CTFd notes", "body": "Run behind nginx." }))).unwrap();
+    store.create(obj(json!({ "title": "Unrelated", "body": "Semester plan." }))).unwrap();
+    let mut settings = Settings::default();
+    settings.ai.provider = "custom".into();
+    settings.ai.base_url = fake_chat("Use one container per team [[Per-team containers]], behind nginx ([[CTFd notes]]).");
+
+    let app = tauri::test::mock_app();
+    app.manage(AppState {
+        store: Mutex::new(Some(store)),
+        settings: Mutex::new(settings),
+        watcher: Mutex::new(None),
+        settings_file: dir.join("settings.json"),
+        db_file: dir.join("brain.db"),
+        home: dir.clone(),
+        open_error: Mutex::new(None),
+    });
+    app.manage(EmbedState::default());
+    let h = app.handle().clone();
+
+    let a = tauri::async_runtime::block_on(crate::ask::answer(&h, "How should I isolate team containers?".into(), vec![])).unwrap();
+    assert_eq!(a.retrieval, "full-text");
+    let titles: Vec<(&str, &str)> = a.sources.iter().map(|s| (s.title.as_str(), s.why.as_str())).collect();
+    assert_eq!(titles, vec![("Per-team containers", "match"), ("CTFd notes", "neighbour")]);
+    assert_eq!(a.cited.len(), 2);
+    assert!(a.answer.unwrap().contains("[[CTFd notes]]"));
+
+    // AI off: sources only
+    h.state::<AppState>().settings.lock().unwrap().ai = Default::default();
+    let a = tauri::async_runtime::block_on(crate::ask::answer(&h, "containers".into(), vec![])).unwrap();
+    assert!(a.answer.is_none() && !a.sources.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -359,3 +359,22 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .tag.sugg:hover { background: var(--accent-soft); }
 .sugg-body .empty-note { padding: 2px 0; }
 .error-text { color: var(--danger); }
+
+/* ---------------------------------------------------------------- ask */
+.side-pane.ask-pane { display: flex; flex-direction: column; padding: 0; }
+.ask-pane[hidden] { display: none; }
+.ask-log { flex: 1; min-height: 0; overflow: auto; padding: 8px 0; }
+.ask-msg { padding: 6px 14px; }
+.ask-q { color: var(--text); font-weight: 500; border-top: 1px solid var(--border); padding-top: 10px; white-space: pre-wrap; }
+.ask-q:first-child { border-top: 0; }
+.ask-a .markdown { font-size: 13px; line-height: 1.55; }
+.ask-a .markdown p { margin: 0 0 .6em; }
+.ask-sources { margin: 4px -14px 0; }
+.ask-sources .side-label { padding-left: 14px; }
+.ask-sources .item-row { padding-left: 14px; }
+.item-row.cited .row-title { color: var(--accent); }
+.ask-form { border-top: 1px solid var(--border); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.ask-form textarea { width: 100%; resize: none; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); outline: none; font: 13px/1.4 var(--font); }
+.ask-form textarea:focus { border-color: var(--accent); }
+.ask-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ask-hint { font-size: 11px; }

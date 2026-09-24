@@ -101,3 +101,11 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - Right-click menus on graph nodes, file/tag/inbox rows, sidebar link lists and in the editor. AI items stay in the menu but are disabled with "Set up an AI provider in Settings to use this" when AI is off (the design brief: AI looks like normal features).
 - Tag/lobe suggestions: the model may only pick from existing tags and lobe ids; the backend enforces that (case-insensitive match to the real tag, max 3, not already on the item). Items in the Inbox get suggestions automatically when selected (cached per item version); other items on request. Chips accept one at a time; Ctrl Enter accepts all when focus isn't in an editor.
 - The browser preview has a deterministic fake AI (only when a provider is chosen in Settings) so the UI can be exercised without a model.
+
+## Milestone 9: Ask
+- Ask is a right-sidebar view (icon: message). Enter asks, Shift Enter adds a line; the last 3 exchanges go along for follow-ups.
+- Retrieval: embed the question and take the top 6 by cosine (> 0.2); without embeddings (or if the server is down) fall back to FTS in "any word" mode with common question words dropped (the normal AND search finds nothing for whole questions). Then add wikilink neighbours of the best 3, capped at 10 items of ≤ 1200 chars each.
+- The prompt makes the model cite `[[Exact Title]]` and say when the notes don't cover the question; citations are resolved against the retrieved items only.
+- Without an AI provider, Ask still works as a search: it lists the matching notes (and says AI is off) instead of failing.
+- Sources are listed under each answer (cited ones in the accent colour, neighbours marked "linked"); the cited notes (or the matches, if nothing was cited) light up in the graph as a focus set, and the camera flies to their centre.
+- `ask::answer` is generic over the Tauri runtime so the full pipeline is tested with the mock runtime and a loopback fake chat server.

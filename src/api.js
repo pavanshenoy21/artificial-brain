@@ -48,6 +48,7 @@ function tauriBackend() {
     aiFillForm: (kind, text) => call("ai_fill_form", { kind, text }),  // { field: value }
     aiSuggest: id => call("ai_suggest", { id }),              // { tags, lobe }
     aiApply: (id, patch) => call("ai_apply", { id, patch }),   // keeps the original in .brain/history
+    ask: (question, history = []) => call("ask", { question, history }), // { answer|null, sources, cited, retrieval }
     githubSync: () => call("github_sync"),                    // { total, created, updated, last_sync }
     githubStatus: () => call("github_status"),                // { configured, last_sync }
     githubTest: settings => call("github_test", { settings }),

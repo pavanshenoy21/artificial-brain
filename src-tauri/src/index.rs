@@ -217,6 +217,16 @@ impl Index {
     /// match, as a prefix, so "jw wri" finds "Writeup: JWT".
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
         let Some(q) = fts_query(query) else { return Ok(vec![]) };
+        self.search_fts(&q, limit)
+    }
+
+    /// Like `search`, but any word may match (for questions in Ask).
+    pub fn search_any(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
+        let Some(q) = fts_query_any(query) else { return Ok(vec![]) };
+        self.search_fts(&q, limit)
+    }
+
+    fn search_fts(&self, q: &str, limit: usize) -> Result<Vec<Hit>> {
         let mut stmt = self.db.prepare(
             "SELECT id, -bm25(items_fts, 0.0, 10.0, 4.0, 1.0, 0.5) AS score,
                     snippet(items_fts, 3, char(1), char(2), '…', 14)
@@ -336,6 +346,22 @@ fn extra_text(fields: &Map<String, Value>) -> String {
     out.join(" ")
 }
 
+/// Looser query for questions: any word may match (OR), common words dropped.
+pub fn fts_query_any(q: &str) -> Option<String> {
+    const STOP: &[&str] = &[
+        "a", "an", "and", "are", "as", "at", "be", "by", "can", "did", "do", "does", "for", "from", "have", "how", "i",
+        "if", "in", "is", "it", "me", "my", "of", "on", "or", "should", "that", "the", "this", "to", "was", "what", "when",
+        "where", "which", "who", "why", "with", "you", "about", "any", "know", "tell",
+    ];
+    let words: Vec<String> = q
+        .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+        .map(|w| w.trim_matches('-').to_lowercase())
+        .filter(|w| w.len() > 1 && !STOP.contains(&w.as_str()))
+        .map(|w| format!("\"{w}\"*"))
+        .collect();
+    (!words.is_empty()).then(|| words.join(" OR "))
+}
+
 /// User text -> FTS5 query: each word quoted (so punctuation can't break the
 /// syntax) and prefix-matched; words are ANDed.
 pub fn fts_query(q: &str) -> Option<String> {
@@ -386,6 +412,16 @@ mod tests {
         assert_eq!(fts_query("jwt none-alg").unwrap(), "\"jwt\"* \"none-alg\"*");
         assert_eq!(fts_query("a\"b OR (c)").unwrap(), "\"a\"* \"b\"* \"OR\"* \"c\"*");
         assert!(fts_query("  ?! ").is_none());
+    }
+
+    #[test]
+    fn search_any_matches_questions() {
+        let mut idx = Index::memory().unwrap();
+        add(&mut idx, "notes/Docker.md", "---\nid: d\n---\nContainers per team");
+        add(&mut idx, "notes/Other.md", "---\nid: o\n---\nNothing here");
+        assert!(idx.search("how do I isolate containers", 5).unwrap().is_empty(), "AND fails on questions");
+        assert_eq!(idx.search_any("how do I isolate containers?", 5).unwrap()[0].id, "d");
+        assert!(fts_query_any("what is the").is_none());
     }
 
     #[test]

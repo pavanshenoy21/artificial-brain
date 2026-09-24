@@ -306,6 +306,29 @@ export function createMockBackend({ seed = true } = {}) {
       history.push(clone(items.get(id)));
       return api.updateItem(id, patch);
     },
+    // Mirrors ask.rs: any-word search, 1-hop neighbours, fake cited answer when AI is "on".
+    async ask(question) {
+      const stop = new Set("a an and are as at be by can did do does for from have how i if in is it me my of on or should that the this to was what when where which who why with you about any know tell".split(" "));
+      const words = question.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter(w => w.length > 1 && !stop.has(w));
+      const scored = [];
+      for (const w of words) for (const h of await api.search(w, 10)) {
+        const cur = scored.find(x => x.id === h.id);
+        cur ? (cur.score += h.score) : scored.push({ ...h });
+      }
+      const ranked = scored.sort((a, b) => b.score - a.score).slice(0, 6).map(h => h.id);
+      const edges = links();
+      const sources = [];
+      const add = (id, why) => { if (sources.length < 10 && !sources.some(s => s.id === id)) sources.push({ id, title: items.get(id).title, why }); };
+      ranked.forEach(id => add(id, "match"));
+      for (const id of ranked.slice(0, 3))
+        for (const l of edges) if (l.source === id) add(l.target, "neighbour"); else if (l.target === id) add(l.source, "neighbour");
+      if (!settings.ai.provider) return { answer: null, sources, cited: [], retrieval: "full-text" };
+      const top = sources.slice(0, 2).map(s => items.get(s.id));
+      const answer = top.length
+        ? top.map(it => `${(it.body || it.summary || it.title).replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, t, a) => a || t).split(/(?<=[.!?])\s/)[0]} [[${it.title}]]`).join(" ")
+        : "Your notes don't cover that.";
+      return { answer: `(Browser preview answer) ${answer}`, sources, cited: top.map(t => t.id), retrieval: "full-text" };
+    },
     async githubSync() {
       throw new Error("GitHub sync needs the desktop app (browser preview makes no network calls)");
     },
