@@ -115,3 +115,7 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - The real desktop build was exercised under Xvfb with xdotool (first-run screen, sample import, watcher picking up an outside file, `brain --capture` from a second process, editor autosave to disk, Ctrl K backed by FTS). `scripts/desktop-smoke.sh` keeps that repeatable.
 - A file without `id:` gets its original path written as its id the first time the app edits it, so the id stays stable across later renames (nothing is rewritten before the user edits the file).
 - README rewritten for setup (Fedora deps), features, AI/GitHub setup, keyboard, vault format and development.
+
+## Fixes after first use
+- The graph is only rebuilt when its structure changes (items, types, lobes, links); saving text just updates labels. Before, every autosave re-ran the force layout and the graph jumped.
+- `WEBKIT_DISABLE_DMABUF_RENDERER=1` is set by default on Linux (unless already set): WebKitGTK's DMA-BUF renderer flickers or renders blank on many Fedora/Wayland/NVIDIA setups.

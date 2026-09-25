@@ -221,7 +221,24 @@ export function createGraphView(container) {
 
   // ---------------------------------------------------------------- data
   let graphLinks = [];
+  let lastShape = "";
+  // What the layout depends on. Saving a note's text changes none of it, so the
+  // graph shouldn't be rebuilt (and re-laid-out) on every autosave.
+  const shapeOf = () => JSON.stringify([
+    [...app.items.values()].map(n => [n.id, n.type, n.lobe, n.degree]),
+    app.links.map(l => [l.source, l.target, l.kind]),
+    app.lobes.map(l => [l.id, l.name, l.color]),
+  ]);
+
   function setData() {
+    const shape = shapeOf();
+    if (shape === lastShape) {
+      // same structure: refresh labels in place, keep the layout still
+      for (const n of app.items.values()) if (n.__v && n.__v.label.text !== n.title) n.__v.label.text = n.title;
+      refocus();
+      return;
+    }
+    lastShape = shape;
     centers = lobeCenters(app.lobes);
     for (const n of app.items.values()) {
       if (n.x !== undefined) continue;
@@ -234,6 +251,10 @@ export function createGraphView(container) {
     graphLinks = app.links.map(l => ({ ...l }));
     buildLobes();
     Graph.graphData({ nodes: [...app.items.values()], links: graphLinks });
+    refocus();
+  }
+
+  function refocus() {
     if (state.focus?.kind === "node") {
       const n = app.items.get(state.focus.node.id);
       if (n) { state.focus.node = n; state.levels = bfsLevels([n.id]); } else state.focus = null;
