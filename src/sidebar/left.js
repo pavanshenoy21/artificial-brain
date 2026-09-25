@@ -141,11 +141,14 @@ export function initLeftSidebar({ graph }) {
   const tagsPane = left.add({ id: "tags", title: "Tags", iconName: "tags" });
   const openTags = new Set();
   function renderTags() {
-    const counts = new Map();
-    for (const n of app.items.values()) for (const t of allTags(n)) counts.set(t, (counts.get(t) || 0) + 1);
-    const sorted = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const byTag = new Map();
+    for (const n of app.items.values()) for (const t of allTags(n)) {
+      if (!byTag.has(t)) byTag.set(t, []);
+      byTag.get(t).push(n);
+    }
+    const sorted = [...byTag].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
     setHtml(tagsPane, `<div class="tree">
-      ${sorted.map(([t, c]) => tagGroup(t, `#${t}`, [...app.items.values()].filter(n => allTags(n).includes(t)), c)).join("")}
+      ${sorted.map(([t, items]) => tagGroup(t, `#${t}`, items)).join("")}
       ${!sorted.length ? `<div class="empty-note">No tags yet.</div>` : ""}
     </div>`);
   }

@@ -55,3 +55,14 @@ test("lobe centres are distinct and unsorted sits in the middle", () => {
   const xy = ["x", "y", "z"].map(id => c.get(id).slice(0, 2).map(v => Math.round(v)).join());
   assert.equal(new Set(xy).size, 3);
 });
+
+test("tag similarity stays fast on a big vault and skips pairs already linked", async () => {
+  const { similarityLinks } = await import("../src/data/similar.js");
+  const nodes = Array.from({ length: 3000 }, (_, i) => ({ id: `n${i}`, tags: [`t${i % 150}`, `t${(i * 7) % 150}`, "common"], inline_tags: [] }));
+  const t0 = performance.now();
+  const out = similarityLinks(nodes, [{ source: "n0", target: "n150" }]);
+  assert.ok(performance.now() - t0 < 1500, `took ${performance.now() - t0}ms`);
+  assert.ok(out.length > 0 && out.length <= 6000);
+  assert.ok(!out.some(l => [l.source, l.target].sort().join() === "n0,n150"));
+  assert.equal(similarityLinks(nodes, [{ source: "n0", target: "n150" }]), out, "cached when nothing changed");
+});
