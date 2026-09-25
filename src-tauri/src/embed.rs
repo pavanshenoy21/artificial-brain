@@ -49,8 +49,9 @@ pub struct EmbedState {
 /// The text that represents an item: title, tags, summary-ish fields, body.
 pub fn item_text(item: &Item) -> String {
     let mut parts = vec![item.title.clone()];
-    if !item.tags.is_empty() {
-        parts.push(item.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "));
+    let tags = item.all_tags();
+    if !tags.is_empty() {
+        parts.push(tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "));
     }
     for k in ["summary", "description", "built", "role", "level", "site"] {
         if let Some(Value::String(s)) = item.fields.get(k) {
@@ -389,7 +390,7 @@ mod tests {
         fields.insert("summary".into(), json!("A summary"));
         fields.insert("stack".into(), json!(["Rust", "JS"]));
         let item = Item {
-            id: "x".into(), kind: "link".into(), lobe: None, title: "Title".into(), tags: vec!["t".into()],
+            id: "x".into(), kind: "link".into(), lobe: None, title: "Title".into(), tags: vec!["t".into()], inline_tags: vec![],
             body: "Body".into(), path: "links/Title.md".into(), created: None, updated: None, fields,
         };
         assert_eq!(item_text(&item), "Title\n#t\nA summary\nRust, JS\nBody");

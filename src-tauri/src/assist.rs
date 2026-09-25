@@ -171,7 +171,7 @@ pub async fn ai_suggest(state: State<'_, AppState>, id: String) -> Cmd<Suggestio
     let text = crate::embed::item_text(&item);
     let out = chat(&state, &system, &text, 120).await.map_err(|e| e.to_string())?;
     let lobe_ids: Vec<String> = lobes.iter().map(|l| l.id.clone()).collect();
-    let mut sug = clean_suggestion(&out, &tags, &item.tags, &lobe_ids);
+    let mut sug = clean_suggestion(&out, &tags, &item.all_tags(), &lobe_ids);
     if item.lobe.as_ref() == sug.lobe.as_ref() {
         sug.lobe = None;
     }

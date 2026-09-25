@@ -378,3 +378,10 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .ask-form textarea:focus { border-color: var(--accent); }
 .ask-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ask-hint { font-size: 11px; }
+.tag-inline { background: transparent; border: 1px solid var(--accent-soft); }
+.files-head { display: flex; gap: 6px; align-items: center; }
+.files-head .side-filter { flex: 1; min-width: 0; }
+.files-head .seg { flex: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 2px; }
+.tree .row { padding-left: calc(12px + var(--depth, 0) * 14px); }
+.tree .group-head { padding-left: calc(6px + var(--depth, 0) * 14px); }
+.tree .group-head.folder { color: var(--text); font-weight: 400; }

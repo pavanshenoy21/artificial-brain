@@ -12,7 +12,7 @@ use crate::error::Result;
 use crate::markdown as md;
 use crate::vault::Item;
 
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Link {
@@ -70,7 +70,8 @@ impl Index {
                type    TEXT NOT NULL,
                lobe    TEXT,
                title   TEXT NOT NULL,
-               tags    TEXT NOT NULL,   -- JSON array
+               tags    TEXT NOT NULL,   -- JSON array (frontmatter)
+               inline_tags TEXT NOT NULL DEFAULT '[]', -- JSON array (#tags in the body)
                fields  TEXT NOT NULL,   -- JSON object of type-specific fields
                body    TEXT NOT NULL,
                created TEXT,
@@ -248,20 +249,20 @@ pub fn upsert(db: &Connection, mut item: Item, (mtime, size): (i64, i64)) -> Res
     }
     remove_path(db, &item.path)?;
     db.execute(
-        "INSERT INTO items (id, path, type, lobe, title, tags, fields, body, created, updated, mtime, size)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO items (id, path, type, lobe, title, tags, fields, body, created, updated, mtime, size, inline_tags)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             item.id, item.path, item.kind, item.lobe, item.title,
             serde_json::to_string(&item.tags)?, serde_json::to_string(&item.fields)?, item.body,
-            item.created, item.updated, mtime, size
+            item.created, item.updated, mtime, size, serde_json::to_string(&item.inline_tags)?
         ],
     )?;
-    for t in &item.tags {
+    for t in &item.all_tags() {
         db.execute("INSERT OR IGNORE INTO tags (item_id, tag) VALUES (?1, ?2)", params![item.id, t])?;
     }
     db.execute(
         "INSERT INTO items_fts (id, title, tags, body, extra) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![item.id, item.title, item.tags.join(" "), item.body, extra_text(&item.fields)],
+        params![item.id, item.title, item.all_tags().join(" "), item.body, extra_text(&item.fields)],
     )?;
     Ok(item.id)
 }
@@ -374,7 +375,7 @@ pub fn fts_query(q: &str) -> Option<String> {
     (!words.is_empty()).then(|| words.join(" "))
 }
 
-const SELECT_ITEM: &str = "SELECT id, type, lobe, title, tags, body, path, created, updated, fields FROM items";
+const SELECT_ITEM: &str = "SELECT id, type, lobe, title, tags, body, path, created, updated, fields, inline_tags FROM items";
 
 fn row_to_item(r: &rusqlite::Row) -> rusqlite::Result<Item> {
     let tags: String = r.get(4)?;
@@ -385,6 +386,7 @@ fn row_to_item(r: &rusqlite::Row) -> rusqlite::Result<Item> {
         lobe: r.get(2)?,
         title: r.get(3)?,
         tags: serde_json::from_str(&tags).unwrap_or_default(),
+        inline_tags: serde_json::from_str(&r.get::<_, String>(10)?).unwrap_or_default(),
         body: r.get(5)?,
         path: r.get(6)?,
         created: r.get(7)?,
@@ -483,5 +485,8 @@ mod tests {
         assert!(idx.links().unwrap().is_empty());
         assert!(idx.search("b", 5).unwrap().iter().all(|h| h.id != "b"));
         assert_eq!(idx.tags().unwrap(), vec![("x".to_string(), 1)]);
+        add(&mut idx, "notes/C.md", "---\nid: c\ntags: [x]\n---\nInline #y and #x");
+        assert_eq!(idx.tags().unwrap(), vec![("x".to_string(), 2), ("y".to_string(), 1)], "inline #tags count");
+        assert_eq!(idx.search("y", 5).unwrap()[0].id, "c");
     }
 }

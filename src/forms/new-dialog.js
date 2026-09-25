@@ -2,6 +2,7 @@
 // type's form fields. A link goes through quick capture (fetch + summary).
 
 import { app } from "../state.js";
+import { allTags } from "../lib/tags.js";
 import { api } from "../api.js";
 import { FORMS, TYPE } from "../lib/types.js";
 import { UNSORTED } from "../lib/lobes.js";
@@ -30,7 +31,7 @@ export function openNewDialog(type, { prefill = {} } = {}) {
           : `<label class="prop"><span>title</span><input data-f="title" required spellcheck="false" value="${esc(prefill.title || "")}" /></label>
              <label class="prop"><span>lobe</span><select data-f="lobe">${lobes.map(l => `<option value="${esc(l.id)}" ${l.id === (prefill.lobe || UNSORTED.id) ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
              <label class="prop"><span>tags</span><input data-f="tags" placeholder="comma-separated" spellcheck="false" list="dlg-tags" value="${esc((prefill.tags || []).join(", "))}" /></label>
-             <datalist id="dlg-tags">${[...new Set([...app.items.values()].flatMap(n => n.tags || []))].sort().map(t => `<option value="${esc(t)}"></option>`).join("")}</datalist>
+             <datalist id="dlg-tags">${[...new Set([...app.items.values()].flatMap(allTags))].sort().map(t => `<option value="${esc(t)}"></option>`).join("")}</datalist>
              ${form.map(f => fieldControl(f, prefill[f.key])).join("")}`}
       </div>
       <div class="dialog-foot">

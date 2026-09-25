@@ -23,3 +23,13 @@ export async function openExternal(url) {
   }
   window.open(url, "_blank", "noopener");
 }
+
+// Replace an element's HTML only when it actually changed. Sidebars re-render
+// on every data reload (each autosave); swapping identical HTML makes them
+// flicker, lose hover and reset scroll.
+export function setHtml(el, html, force = false) {
+  if (!force && el.__html === html) return false;
+  el.innerHTML = html;
+  el.__html = html;
+  return true;
+}

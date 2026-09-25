@@ -2,6 +2,7 @@
 // outgoing links, backlinks (with the line that links here) and suggested items.
 
 import { app } from "../state.js";
+import { allTags } from "../lib/tags.js";
 import { api } from "../api.js";
 import { right } from "../shell/layout.js";
 import { icon, typeIcon } from "../icons.js";
@@ -9,12 +10,12 @@ import { FORMS, TYPE, TYPES } from "../lib/types.js";
 import { fieldControl, readValue, bindLinkInputs } from "../forms/fields.js";
 import { UNSORTED } from "../lib/lobes.js";
 import { itemMenu, aiOn, AI_OFF } from "../ai/actions.js";
-import { esc, openExternal } from "../util.js";
+import { esc, openExternal, setHtml } from "../util.js";
 import { eachWikilink, linkTarget } from "../lib/wikilinks.js";
 import { deleteItem } from "../actions.js";
 import { toast } from "../shell/toast.js";
 
-const KNOWN = new Set(["id", "type", "lobe", "title", "tags", "body", "path", "created", "updated", "degree"]);
+const KNOWN = new Set(["id", "type", "lobe", "title", "tags", "inline_tags", "body", "path", "created", "updated", "degree"]);
 const LAYOUT = /^(x|y|z|vx|vy|vz|fx|fy|fz|index|__.*)$/;
 const unwiki = s => s.replace(/!?\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_, t, a) => a || t.split("#")[0]);
 
@@ -60,7 +61,7 @@ export function initRightSidebar() {
   function suggestionsHtml(n) {
     if (!aiOn()) return "";
     const s = sugg.get(n.id);
-    const wanted = !n.tags?.length || n.lobe === UNSORTED.id;
+    const wanted = !allTags(n).length || n.lobe === UNSORTED.id;
     if (!s && !wanted) return "";
     let body;
     if (!s) body = `<button type="button" class="btn" data-act="suggest">Suggest tags and lobe</button>`;
@@ -118,15 +119,17 @@ export function initRightSidebar() {
     const known = new Set(form.map(f => f.key));
     // frontmatter keys the form doesn't know (hand-written, or from another type) stay editable as text
     const extra = Object.keys(n).filter(k => !KNOWN.has(k) && !LAYOUT.test(k) && !known.has(k) && k !== "error");
-    const allTags = [...new Set([...app.items.values()].flatMap(x => x.tags || []))].sort();
+    const knownTags = [...new Set([...app.items.values()].flatMap(allTags))].sort();
+    const inline = (n.inline_tags || []).filter(t => !(n.tags || []).includes(t));
     const synced = n.type === "project" && !!n.pushed_at;
     return `<div class="props-form">
       <label class="prop"><span>type</span><select data-prop="type">${TYPES.map(t => `<option value="${t.id}" ${t.id === n.type ? "selected" : ""}>${t.one}</option>`).join("")}</select></label>
       <label class="prop"><span>lobe</span><select data-prop="lobe">${lobes.map(l => `<option value="${esc(l.id)}" ${l.id === n.lobe ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
       <div class="prop"><span>tags</span><div class="tag-edit">
         ${(n.tags || []).map(t => `<span class="tag">#${esc(t)}<button type="button" data-untag="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("x", { size: 11 })}</button></span>`).join("")}
-        <input data-tag-input list="all-tags" placeholder="${n.tags?.length ? "" : "add tag"}" spellcheck="false" />
-        <datalist id="all-tags">${allTags.map(t => `<option value="${esc(t)}"></option>`).join("")}</datalist>
+        ${inline.map(t => `<span class="tag tag-inline" title="Written as #${esc(t)} in the note">#${esc(t)}</span>`).join("")}
+        <input data-tag-input list="all-tags" placeholder="${allTags(n).length ? "" : "add tag"}" spellcheck="false" />
+        <datalist id="all-tags">${knownTags.map(t => `<option value="${esc(t)}"></option>`).join("")}</datalist>
       </div></div>
       ${form.map(f => fieldControl(f, n[f.key], { github: synced })).join("")}
       ${extra.map(k => fieldControl({ key: k, kind: Array.isArray(n[k]) ? "list" : typeof n[k] === "number" ? "number" : "text" }, n[k])).join("")}
@@ -134,7 +137,7 @@ export function initRightSidebar() {
     </div>`;
   }
 
-  function render() {
+  function render(force = false) {
     // don't yank an input away while the user is typing in it
     if (pane.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
       deferred = true;
@@ -143,12 +146,12 @@ export function initRightSidebar() {
     deferred = false;
     const n = app.items.get(app.selected);
     if (!n) {
-      pane.innerHTML = `<div class="empty-note pad">Select an item in the graph or the file list.</div>`;
+      setHtml(pane, `<div class="empty-note pad">Select an item in the graph or the file list.</div>`);
       return;
     }
     const lobe = app.lobeOf(n);
     const out = app.outgoing(n.id), back = app.backlinks(n.id), sim = app.similar(n.id);
-    pane.innerHTML = `
+    setHtml(pane, `
       <div class="item-head">
         <div class="item-kind">${typeIcon(n.type, lobe.color, 12)}<span>${esc(TYPE[n.type]?.one || n.type)}</span>
           <span class="sep">·</span><span class="dot" style="background:${lobe.color}"></span><span>${esc(lobe.name)}</span></div>
@@ -167,7 +170,7 @@ export function initRightSidebar() {
       ${section("out", "Outgoing links", "outgoing", out.length, linkRows(out))}
       ${section("back", "Backlinks", "backlinks", back.length, linkRows(back, true))}
       ${section("sim", "Suggested", "suggested", sim.length, linkRows(sim))}
-      <div class="item-foot">${n.path ? esc(n.path) : ""}${n.updated ? ` · updated ${esc(String(n.updated).slice(0, 10))}` : ""}</div>`;
+      <div class="item-foot">${n.path ? esc(n.path) : ""}${n.updated ? ` · updated ${esc(String(n.updated).slice(0, 10))}` : ""}</div>`, force);
   }
 
   async function patch(p) {
@@ -179,7 +182,7 @@ export function initRightSidebar() {
       await app.reload();
     } catch (e) {
       toast(`Couldn't save: ${e}`, "error");
-      render();
+      render(true);
     }
   }
 
@@ -250,7 +253,7 @@ export function initRightSidebar() {
         patch({ tags: n.tags.slice(0, -1) });
       }
     } else if (el.tagName === "INPUT" && e.key === "Enter" && !el.dataset.linkInput) el.blur();
-    if (e.key === "Escape" && /INPUT|TEXTAREA/.test(el.tagName)) { el.blur(); render(); }
+    if (e.key === "Escape" && /INPUT|TEXTAREA/.test(el.tagName)) { el.blur(); render(true); }
   });
   bindLinkInputs(pane, (key, list) => patch({ [key]: list.length ? list.map(t => `[[${t}]]`) : null }));
   pane.addEventListener("focusout", () => setTimeout(() => { if (deferred) render(); }, 0));
@@ -261,7 +264,7 @@ export function initRightSidebar() {
     render();
     // Inbox items (no tags) get suggestions automatically; others on request
     const n = app.items.get(id);
-    if (n && aiOn() && !n.tags?.length) suggest(id);
+    if (n && aiOn() && !allTags(n).length) suggest(id);
   });
   app.on("suggest", id => suggest(id, { force: true }));
   app.on("accept-suggestions", () => {

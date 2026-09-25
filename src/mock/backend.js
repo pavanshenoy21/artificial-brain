@@ -5,9 +5,10 @@
 import { LOBES, buildSampleGraph } from "../data/sample.js";
 import { TYPE } from "../lib/types.js";
 import { fileStem, linkIndex, renameWikilinks, resolve, wikilinks } from "../lib/wikilinks.js";
+import { inlineTags, allTags } from "../lib/tags.js";
 
-const MANAGED = new Set(["id", "path", "created", "updated", "degree"]);
-const CORE = new Set(["id", "type", "lobe", "title", "tags", "body", "path", "created", "updated"]);
+const MANAGED = new Set(["id", "path", "created", "updated", "degree", "inline_tags"]);
+const CORE = new Set(["id", "type", "lobe", "title", "tags", "inline_tags", "body", "path", "created", "updated"]);
 const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function normalizeUrl(text) {
@@ -94,13 +95,16 @@ export function createMockBackend({ seed = true } = {}) {
   }
 
   const clone = x => structuredClone(x);
+  // what the backend returns for an item: plus its inline #tags (like vault.rs)
+  const view = it => ({ ...structuredClone(it), inline_tags: inlineTags(it.body) });
+  const tagsOf = it => allTags(view(it));
 
   const api = {
     async loadGraph() {
-      return { nodes: [...items.values()].map(clone), links: links(), lobes: clone(lobes) };
+      return { nodes: [...items.values()].map(view), links: links(), lobes: clone(lobes) };
     },
     async getItem(id) {
-      return items.has(id) ? clone(items.get(id)) : null;
+      return items.has(id) ? view(items.get(id)) : null;
     },
     async createItem(input) {
       const t = now();
@@ -110,7 +114,7 @@ export function createMockBackend({ seed = true } = {}) {
       item.path = uniquePath(item.type, item.title);
       items.set(item.id, item);
       emit("items");
-      return clone(item);
+      return view(item);
     },
     async updateItem(id, patch) {
       const item = items.get(id);
@@ -135,7 +139,7 @@ export function createMockBackend({ seed = true } = {}) {
         }
       }
       emit("items");
-      return clone(item);
+      return view(item);
     },
     async deleteItem(id) {
       items.delete(id);
@@ -143,7 +147,7 @@ export function createMockBackend({ seed = true } = {}) {
     },
     async listTags() {
       const counts = new Map();
-      for (const it of items.values()) for (const t of it.tags) counts.set(t, (counts.get(t) || 0) + 1);
+      for (const it of items.values()) for (const t of tagsOf(it)) counts.set(t, (counts.get(t) || 0) + 1);
       return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
     },
     async importSample() {
@@ -174,7 +178,7 @@ export function createMockBackend({ seed = true } = {}) {
       const hits = [];
       for (const it of items.values()) {
         const fields = [
-          [it.title, 10], [it.tags.join(" "), 4], [it.body, 1],
+          [it.title, 10], [tagsOf(it).join(" "), 4], [it.body, 1],
           [Object.entries(it).filter(([k]) => !CORE.has(k)).map(([, v]) => [].concat(v).join(" ")).join(" "), 0.5],
         ].map(([t, w]) => [String(t || "").toLowerCase(), w]);
         let score = 0;
@@ -297,8 +301,8 @@ export function createMockBackend({ seed = true } = {}) {
       needAi();
       const it = items.get(id);
       const words = new Set(`${it.title} ${it.body}`.toLowerCase().split(/[^\p{L}\p{N}+#-]+/u));
-      const all = [...new Set([...items.values()].flatMap(x => x.tags))];
-      const tags = all.filter(t => words.has(t) && !it.tags.includes(t)).slice(0, 3);
+      const all = [...new Set([...items.values()].flatMap(tagsOf))];
+      const tags = all.filter(t => words.has(t) && !tagsOf(it).includes(t)).slice(0, 3);
       const lobe = lobes.find(l => l.name.toLowerCase().split(/[^a-z]+/).some(w => w.length > 2 && words.has(w)))?.id || null;
       return { tags, lobe: lobe === it.lobe ? null : lobe };
     },

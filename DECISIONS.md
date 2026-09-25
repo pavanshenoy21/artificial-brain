@@ -119,3 +119,7 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 ## Fixes after first use
 - The graph is only rebuilt when its structure changes (items, types, lobes, links); saving text just updates labels. Before, every autosave re-ran the force layout and the graph jumped.
 - `WEBKIT_DISABLE_DMABUF_RENDERER=1` is set by default on Linux (unless already set): WebKitGTK's DMA-BUF renderer flickers or renders blank on many Fedora/Wayland/NVIDIA setups.
+- Sidebars, tab bar and status bar only swap their HTML when it changed (`setHtml`); re-rendering identical HTML on every autosave made them flicker.
+- Files view has a Folders / Types switch; Folders (default) mirrors the vault's real folder tree, so an existing Obsidian vault keeps its structure. The app never moves a user's files: a type change only moves a file between the app's own type folders.
+- Inline `#tags` in the body (Obsidian style, including nested `#a/b`) count as tags everywhere (Tags view, Inbox, search, suggestions, similarity). They stay inline: editing tags in Properties only writes frontmatter `tags:`.
+- Type is inferred from a folder only for the exact lowercase type folders (`projects/`…), so a vault's own "Projects/" folder stays plain notes. Index schema bumped so existing indexes rebuild with these rules.

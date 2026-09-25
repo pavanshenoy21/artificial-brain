@@ -3,6 +3,7 @@
 // (milestone 6) a semantic score is blended in via setSemanticSearch().
 
 import { app } from "../state.js";
+import { allTags } from "../lib/tags.js";
 import { api } from "../api.js";
 import { openPalette } from "./palette.js";
 import { typeIcon } from "../icons.js";
@@ -57,7 +58,7 @@ export function openSearch({ onPick }) {
       const lobe = app.lobeOf(n);
       const meta = snippet?.includes("\u0001")
         ? snippetHtml(snippet)
-        : esc([TYPE[n.type]?.one, ...(n.tags || []).slice(0, 3).map(t => "#" + t)].filter(Boolean).join(" · "));
+        : esc([TYPE[n.type]?.one, ...allTags(n).slice(0, 3).map(t => "#" + t)].filter(Boolean).join(" · "));
       return `${typeIcon(n.type, lobe.color, 13)}
         <div class="r-main"><div class="r-title">${highlight(n.title, q)}</div><div class="r-meta">${meta}</div></div>
         <span class="r-side"><span class="dot" style="background:${lobe.color}"></span>${esc(lobe.name)}</span>`;

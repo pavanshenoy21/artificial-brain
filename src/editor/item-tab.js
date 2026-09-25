@@ -2,6 +2,7 @@
 // (autosave after 500ms) or reading view (Ctrl E toggles).
 
 import { app } from "../state.js";
+import { allTags } from "../lib/tags.js";
 import { api } from "../api.js";
 import { md } from "./markdown.js";
 import { createEditor } from "./editor.js";
@@ -119,7 +120,7 @@ export function itemTab(pane, tab) {
       <span class="sep">·</span><span class="dot" style="background:${lobe.color}"></span><span>${esc(lobe.name)}</span>
       ${n.path ? `<span class="sep">·</span><span class="path">${esc(n.path)}</span>` : ""}
       <span class="doc-mode"><button type="button" class="btn-link" data-act="mode" title="Toggle reading view (Ctrl E)">${mode === "edit" ? "Reading view" : "Edit"}</button></span>`;
-    $(".doc-tags").innerHTML = n.tags?.length ? n.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join("") : "";
+    $(".doc-tags").innerHTML = allTags(n).length ? allTags(n).map(t => `<span class="tag">#${esc(t)}</span>`).join("") : "";
     if (document.activeElement !== titleInput) titleInput.value = n.title;
     autosize();
   }

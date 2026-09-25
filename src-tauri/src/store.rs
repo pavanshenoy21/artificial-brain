@@ -149,6 +149,7 @@ impl Store {
             lobe: None,
             title: String::new(),
             tags: vec![],
+            inline_tags: vec![],
             body: String::new(),
             path: String::new(),
             created: Some(now.clone()),
@@ -183,7 +184,9 @@ impl Store {
 
         let new_stem = md::file_stem_for(&item.title);
         let renamed = item.title != old_title && new_stem != old_stem;
-        let moved = item.kind != old_kind;
+        // A type change moves the file between the app's type folders, but never
+        // out of a folder the user made (e.g. an imported Obsidian vault).
+        let moved = item.kind != old_kind && old_file.parent() == Some(self.vault.type_dir(&old_kind).as_path());
         let file = if renamed || moved {
             let dir = if moved { self.vault.type_dir(&item.kind) } else { old_file.parent().unwrap_or(self.vault.root()).to_path_buf() };
             let stem = if renamed { new_stem } else { old_stem.clone() };
@@ -385,6 +388,13 @@ mod tests {
 
         let b3 = s.update(&b.id, obj(json!({ "type": "skill" }))).unwrap();
         assert_eq!(b3.path, "skills/Gamma.md", "type change moves the file");
+        fs::create_dir_all(s.vault.abs("Uni/DSA")).unwrap();
+        fs::write(s.vault.abs("Uni/DSA/Heaps.md"), "Binary heaps #dsa").unwrap();
+        s.sync().unwrap();
+        let heaps = s.update("Uni/DSA/Heaps.md", obj(json!({ "type": "skill", "title": "Heaps and PQs" }))).unwrap();
+        assert_eq!(heaps.path, "Uni/DSA/Heaps and PQs.md", "user folders are kept");
+        assert_eq!(heaps.inline_tags, vec!["dsa"]);
+        assert!(!fs::read_to_string(s.vault.abs(&heaps.path)).unwrap().contains("- dsa"), "inline tags stay inline");
 
         s.delete(&b.id).unwrap();
         assert!(s.vault.abs(".trash/Gamma.md").exists());

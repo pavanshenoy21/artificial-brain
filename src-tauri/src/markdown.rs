@@ -116,6 +116,48 @@ pub fn normalize_tags(v: Option<&Value>) -> Vec<String> {
     out
 }
 
+/// Obsidian-style inline #tags in the body: `#` at the start or after
+/// whitespace/punctuation, then letters, digits, `_`, `-` or `/` (nested tags),
+/// with at least one non-digit. Code blocks, inline code and headings
+/// (`# Title`) don't count. Returned in first-seen order, deduplicated.
+pub fn inline_tags(body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut in_fence = false;
+    for line in body.lines() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        let mut in_code = false;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '`' {
+                in_code = !in_code;
+            } else if c == '#' && !in_code {
+                let prev_ok = i == 0 || chars[i - 1].is_whitespace() || matches!(chars[i - 1], '(' | ',' | ';' | '"' | '\'');
+                let mut j = i + 1;
+                while j < chars.len() && (chars[j].is_alphanumeric() || matches!(chars[j], '_' | '-' | '/')) {
+                    j += 1;
+                }
+                let tag: String = chars[i + 1..j].iter().collect::<String>().trim_end_matches(['/', '-']).to_string();
+                if prev_ok && !tag.is_empty() && !tag.chars().all(|c| c.is_ascii_digit()) && !out.contains(&tag) {
+                    out.push(tag);
+                }
+                i = j.max(i + 1);
+                continue;
+            }
+            i += 1;
+        }
+    }
+    out
+}
+
 /// The link target of every [[wikilink]] (and ![[embed]]) in the body,
 /// with `|alias`, `#heading` and `^block` parts stripped. Code is skipped.
 pub fn wikilinks(body: &str) -> Vec<String> {
@@ -256,6 +298,12 @@ mod tests {
         assert_eq!(normalize_tags(Some(&json!(["#a", "b", "a"]))), vec!["a", "b"]);
         assert_eq!(normalize_tags(Some(&json!("a, #b c"))), vec!["a", "b", "c"]);
         assert!(normalize_tags(None).is_empty());
+    }
+
+    #[test]
+    fn finds_inline_tags() {
+        let body = "# Heading\nIdeas #ctf and #web-sec, (#nested/tag) #2024 #a1\nurl.com/page#frag `#code` a#b\n```\n#fenced\n```\n#ctf again #ends-";
+        assert_eq!(inline_tags(body), vec!["ctf", "web-sec", "nested/tag", "a1", "ends"]);
     }
 
     #[test]

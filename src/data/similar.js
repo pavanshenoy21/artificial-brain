@@ -1,3 +1,5 @@
+import { allTags } from "../lib/tags.js";
+
 // Stand-in for embedding similarity until step 3: nodes that share tags get a
 // faint "similar" link (top 2 per node), skipping pairs already linked.
 export function similarityLinks(nodes, links) {
@@ -6,7 +8,7 @@ export function similarityLinks(nodes, links) {
   for (const a of nodes) {
     const scored = nodes
       .filter(b => b !== a)
-      .map(b => ({ b, s: b.tags.filter(t => a.tags.includes(t)).length }))
+      .map(b => ({ b, s: allTags(b).filter(t => allTags(a).includes(t)).length }))
       .filter(x => x.s > 0)
       .sort((x, y) => y.s - x.s || x.b.id.localeCompare(y.b.id))
       .slice(0, 2);

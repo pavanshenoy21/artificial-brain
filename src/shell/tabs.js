@@ -3,7 +3,7 @@
 
 import { app } from "../state.js";
 import { icon, typeIcon } from "../icons.js";
-import { esc } from "../util.js";
+import { esc, setHtml } from "../util.js";
 import { prefs } from "../lib/prefs.js";
 import { right } from "./layout.js";
 
@@ -28,14 +28,14 @@ function titleOf(t) {
 }
 
 function renderBar() {
-  bar.innerHTML = tabs.map(t => {
+  setHtml(bar, tabs.map(t => {
     const { html, text } = titleOf(t);
     return `<div class="tab ${t === active ? "on" : ""} ${t.kind === "graph" ? "pinned" : ""}" data-key="${esc(t.key)}" title="${esc(text)}">
       ${html}<span class="tab-title">${esc(text)}</span>
       ${t.kind === "graph" ? "" : `<button type="button" class="tab-close" aria-label="Close tab">${icon("x", { size: 14 })}</button>`}
     </div>`;
   }).join("") + `<div class="tabbar-fill"></div>
-    <button type="button" class="icon-btn" data-act="toggle-right" title="Toggle right sidebar">${icon("panel-right")}</button>`;
+    <button type="button" class="icon-btn" data-act="toggle-right" title="Toggle right sidebar">${icon("panel-right")}</button>`);
 }
 
 bar.addEventListener("click", e => {

@@ -30,6 +30,8 @@ pub struct Item {
     pub lobe: Option<String>,
     pub title: String,
     pub tags: Vec<String>,
+    /// #tags written inline in the body (read-only here; never copied to frontmatter).
+    pub inline_tags: Vec<String>,
     pub body: String,
     /// Path relative to the vault, with forward slashes.
     pub path: String,
@@ -37,6 +39,19 @@ pub struct Item {
     pub updated: Option<String>,
     #[serde(flatten)]
     pub fields: Map<String, Value>,
+}
+
+impl Item {
+    /// Frontmatter tags plus inline #tags, deduplicated.
+    pub fn all_tags(&self) -> Vec<String> {
+        let mut out = self.tags.clone();
+        for t in &self.inline_tags {
+            if !out.contains(t) {
+                out.push(t.clone());
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -182,6 +197,8 @@ pub fn parse_item(text: &str, rel: &str, stem: &str) -> Item {
     let updated = take("updated");
     let tags = md::normalize_tags(front.get("tags"));
     front.remove("tags");
+    let body = body.trim_start_matches(['\n', '\r']).trim_end().to_string();
+    let inline_tags = md::inline_tags(&body);
 
     Item {
         id,
@@ -189,7 +206,8 @@ pub fn parse_item(text: &str, rel: &str, stem: &str) -> Item {
         lobe,
         title,
         tags,
-        body: body.trim_start_matches(['\n', '\r']).trim_end().to_string(),
+        inline_tags,
+        body,
         path: rel.to_string(),
         created,
         updated,
@@ -272,7 +290,9 @@ pub fn type_dir(kind: &str) -> &'static str {
 }
 
 fn type_from_dir(rel: &str) -> &'static str {
-    match rel.split('/').next().unwrap_or("").to_lowercase().as_str() {
+    // exact (lowercase) names only: an Obsidian vault's "Projects/" folder is
+    // the user's own folder, not the app's project type
+    match rel.split('/').next().unwrap_or("") {
         "links" => "link",
         "skills" => "skill",
         "hackathons" => "hackathon",
@@ -305,7 +325,8 @@ mod tests {
             lobe: Some("web".into()),
             title: "Writeup: JWT".into(),
             tags: vec!["ctf".into()],
-            body: "See [[Other]]".into(),
+            inline_tags: vec!["inline".into()],
+            body: "See [[Other]] #inline".into(),
             path: "links/Writeup JWT.md".into(),
             created: Some("2026-09-24T10:00:00+05:30".into()),
             updated: Some("2026-09-24T10:00:00+05:30".into()),
@@ -320,6 +341,7 @@ mod tests {
     fn plain_file_falls_back() {
         let it = parse_item("just text", "skills/Rust.md", "Rust");
         assert_eq!((it.id.as_str(), it.kind.as_str(), it.title.as_str()), ("skills/Rust.md", "skill", "Rust"));
+        assert_eq!(parse_item("x", "Projects/Brain/Plan.md", "Plan").kind, "note");
         let it = parse_item("---\ntype: wat\n---\n", "Loose.md", "Loose");
         assert_eq!(it.kind, "note");
     }
