@@ -61,6 +61,19 @@ Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts → 
 `brain --capture`, shortcut Ctrl+Shift+Space. The running app opens its capture window (a second
 `brain` process just hands the request over).
 
+## GPU crashes / black or frozen graph (Linux)
+
+The graph is WebGL, drawn through your GPU driver. If you see `MESA: error: ZINK: vkQueueSubmit failed
+(VK_ERROR_DEVICE_LOST)` or the graph goes black, the driver reset. The app keeps working and shows a Reload
+button in the graph. Common fixes on Fedora:
+
+- NVIDIA card on the open nouveau/NVK driver (that's when Mesa uses Zink): install the proprietary driver
+  (`sudo dnf install akmod-nvidia` from RPM Fusion, reboot).
+- Try the other WebKit renderer: `WEBKIT_DISABLE_DMABUF_RENDERER=0 npm run tauri dev`
+  (the app turns DMA-BUF off by default because it flickers on many setups).
+- Skip Zink and use Mesa's software OpenGL (always works, slower with big vaults):
+  `LIBGL_ALWAYS_SOFTWARE=1 npm run tauri dev`.
+
 ## AI setup (optional)
 
 Settings → AI provider:

@@ -261,6 +261,26 @@ export function createGraphView(container) {
   const reheat = Graph.d3ReheatSimulation.bind(Graph);
   Graph.d3ReheatSimulation = () => { engineRunning = true; wake(); return reheat(); };
 
+  // GPU driver crashes (e.g. Mesa/Zink "device lost") kill the WebGL context.
+  // Keep the rest of the app working and say what happened instead of hanging.
+  const canvas = Graph.renderer().domElement;
+  const lost = document.createElement("div");
+  lost.className = "empty-state graph-lost";
+  lost.hidden = true;
+  lost.innerHTML = `<p class="empty-title">The graph stopped: the GPU driver reset.</p>
+    <p class="muted">Everything else keeps working. If this keeps happening, see "GPU crashes" in the README.</p>
+    <div class="empty-actions"><button type="button" class="btn primary" data-act="reload-graph">Reload</button></div>`;
+  container.appendChild(lost);
+  lost.addEventListener("click", e => { if (e.target.closest('[data-act="reload-graph"]')) location.reload(); });
+  canvas.addEventListener("webglcontextlost", e => {
+    e.preventDefault();
+    paused = true;
+    Graph.pauseAnimation();
+    lost.hidden = false;
+    console.error("WebGL context lost (GPU driver reset)");
+  });
+  canvas.addEventListener("webglcontextrestored", () => { lost.hidden = true; wake(); });
+
   const scene = Graph.scene();
   scene.add(batches.explicit, batches.similar);
 
