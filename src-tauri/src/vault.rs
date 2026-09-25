@@ -20,6 +20,8 @@ use crate::error::Result;
 use crate::markdown as md;
 
 pub const TYPES: [&str; 5] = ["note", "link", "skill", "hackathon", "project"];
+/// The app's own per-type folders.
+pub const TYPE_DIRS: [&str; 5] = ["notes", "links", "skills", "hackathons", "projects"];
 
 /// An item as the frontend sees it: a flat object, type-specific fields inline.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -59,6 +61,30 @@ pub struct Lobe {
     pub id: String,
     pub name: String,
     pub color: String,
+    /// Top-level vault folder this lobe was made for: items in that folder
+    /// use this lobe unless their frontmatter sets another one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+/// Calm, distinct solid colours for lobes created automatically from folders.
+pub const LOBE_COLORS: [&str; 16] = [
+    "#e06c75", "#56b6c2", "#a98fe0", "#d6a64f", "#7fb77e", "#d98a5f", "#6c9be0", "#c678b6",
+    "#8fb3a0", "#c9a26b", "#7a8bd6", "#b5705f", "#5fa8a0", "#b3b35f", "#9a7fb8", "#d07f8f",
+];
+
+/// Lobe id for a folder name: lowercase, dashes, prefixed so it can't clash with hand-made lobes.
+pub fn folder_lobe_id(folder: &str) -> String {
+    let slug: String = folder
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    format!("folder-{}", if slug.is_empty() { "x".into() } else { slug })
 }
 
 pub fn default_lobes() -> Vec<Lobe> {
@@ -71,7 +97,7 @@ pub fn default_lobes() -> Vec<Lobe> {
         ("col", "College & Life", "#d98a5f"),
     ]
     .into_iter()
-    .map(|(id, name, color)| Lobe { id: id.into(), name: name.into(), color: color.into() })
+    .map(|(id, name, color)| Lobe { id: id.into(), name: name.into(), color: color.into(), folder: None })
     .collect()
 }
 
@@ -153,14 +179,64 @@ impl Vault {
     pub fn lobes(&self) -> Result<Vec<Lobe>> {
         let f = self.lobes_file();
         if !f.exists() {
-            self.save_lobes(&default_lobes())?;
+            write_atomic(&f, &(serde_json::to_string_pretty(&default_lobes())? + "\n"))?;
         }
         let text = fs::read_to_string(&f)?;
         Ok(serde_json::from_str(&text).unwrap_or_else(|_| default_lobes()))
     }
 
     pub fn save_lobes(&self, lobes: &[Lobe]) -> Result<()> {
+        // a folder lobe the user deleted shouldn't come back on the next sync
+        let before = self.lobes().unwrap_or_default();
+        let mut ignored = self.ignored_folders();
+        for l in before.iter().filter(|l| l.folder.is_some()) {
+            if !lobes.iter().any(|x| x.folder == l.folder) {
+                ignored.push(l.folder.clone().unwrap());
+            }
+        }
+        ignored.retain(|f| !lobes.iter().any(|x| x.folder.as_deref() == Some(f.as_str())));
+        ignored.sort();
+        ignored.dedup();
+        write_atomic(&self.root.join(".brain").join("folders-ignored.json"), &(serde_json::to_string_pretty(&ignored)? + "\n"))?;
         write_atomic(&self.lobes_file(), &(serde_json::to_string_pretty(lobes)? + "\n"))
+    }
+
+    fn ignored_folders(&self) -> Vec<String> {
+        fs::read_to_string(self.root.join(".brain").join("folders-ignored.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    /// Adds a lobe (with its own colour) for every top-level folder that has
+    /// none yet. The app's own type folders (notes/, links/, …) don't count.
+    pub fn ensure_folder_lobes(&self, folders: &[String]) -> Result<Vec<Lobe>> {
+        let mut lobes = self.lobes()?;
+        let ignored = self.ignored_folders();
+        let mut changed = false;
+        for f in folders {
+            if TYPE_DIRS.contains(&f.as_str()) || ignored.contains(f) || lobes.iter().any(|l| l.folder.as_deref() == Some(f.as_str())) {
+                continue;
+            }
+            let used: Vec<&str> = lobes.iter().map(|l| l.color.as_str()).collect();
+            let color = LOBE_COLORS
+                .iter()
+                .find(|c| !used.contains(c))
+                .copied()
+                .unwrap_or(LOBE_COLORS[lobes.len() % LOBE_COLORS.len()]);
+            let mut id = folder_lobe_id(f);
+            let mut n = 2;
+            while lobes.iter().any(|l| l.id == id) {
+                id = format!("{}-{n}", folder_lobe_id(f));
+                n += 1;
+            }
+            lobes.push(Lobe { id, name: f.clone(), color: color.into(), folder: Some(f.clone()) });
+            changed = true;
+        }
+        if changed {
+            write_atomic(&self.lobes_file(), &(serde_json::to_string_pretty(&lobes)? + "\n"))?;
+        }
+        Ok(lobes)
     }
 
     /// Keeps an original before an AI action changes it (`.brain/history/`).

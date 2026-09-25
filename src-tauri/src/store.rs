@@ -105,8 +105,27 @@ impl Store {
 
     // ------------------------------------------------------------ reads
 
+    /// Items, links and lobes. Top-level folders get a lobe automatically, and
+    /// items without their own `lobe:` take their folder's lobe.
     pub fn graph(&self) -> Result<Graph> {
-        Ok(Graph { nodes: self.index.items()?, links: self.index.links()?, lobes: self.vault.lobes()?, similar: None })
+        let mut nodes = self.index.items()?;
+        let mut folders: Vec<String> = nodes.iter().filter_map(|n| n.path.split_once('/').map(|(f, _)| f.to_string())).collect();
+        folders.sort();
+        folders.dedup();
+        let lobes = self.vault.ensure_folder_lobes(&folders)?;
+        for n in &mut nodes {
+            let has_own = n.lobe.as_ref().is_some_and(|l| lobes.iter().any(|x| &x.id == l));
+            if has_own {
+                continue;
+            }
+            if let Some((top, _)) = n.path.split_once('/') {
+                if let Some(l) = lobes.iter().find(|l| l.folder.as_deref() == Some(top)) {
+                    n.lobe = Some(l.id.clone());
+                    n.fields.insert("lobe_from".into(), "folder".into());
+                }
+            }
+        }
+        Ok(Graph { nodes, links: self.index.links()?, lobes, similar: None })
     }
 
     pub fn get(&self, id: &str) -> Result<Option<Item>> {
@@ -320,7 +339,7 @@ fn apply_patch(item: &mut Item, patch: Map<String, Value>) -> Result<()> {
             "tags" => item.tags = md::normalize_tags(Some(&v)),
             "body" => item.body = v.as_str().unwrap_or_default().trim_end().to_string(),
             // managed by the store
-            "id" | "path" | "created" | "updated" | "degree" => {}
+            "id" | "path" | "created" | "updated" | "degree" | "lobe_from" | "inline_tags" => {}
             _ if v.is_null() => {
                 item.fields.remove(&k);
             }
@@ -503,10 +522,40 @@ mod tests {
     }
 
     #[test]
+    fn folders_become_lobes() {
+        let (_t, mut s) = setup();
+        for (p, body) in [("Uni/DSA/Heaps.md", "x"), ("Uni/OS.md", "---\nlobe: sec\n---\n"), ("Side Projects/Brain.md", "y"), ("Loose.md", "z")] {
+            let f = s.vault.abs(p);
+            fs::create_dir_all(f.parent().unwrap()).unwrap();
+            fs::write(f, body).unwrap();
+        }
+        s.create(obj(json!({ "title": "In notes" }))).unwrap();
+        s.sync().unwrap();
+        let g = s.graph().unwrap();
+        let lobe = |title: &str| g.nodes.iter().find(|n| n.title == title).unwrap().lobe.clone();
+        assert_eq!(lobe("Heaps").as_deref(), Some("folder-uni"));
+        assert_eq!(lobe("OS").as_deref(), Some("sec"), "frontmatter lobe wins");
+        assert_eq!(lobe("Brain").as_deref(), Some("folder-side-projects"));
+        assert_eq!(lobe("Loose"), None);
+        assert_eq!(lobe("In notes"), None, "type folders don't become lobes");
+        let folder_lobes: Vec<_> = g.lobes.iter().filter(|l| l.folder.is_some()).collect();
+        assert_eq!(folder_lobes.len(), 2);
+        assert_ne!(folder_lobes[0].color, folder_lobes[1].color);
+        assert!(!fs::read_to_string(s.vault.abs("Uni/DSA/Heaps.md")).unwrap().contains("lobe"), "files untouched");
+
+        // deleting a folder lobe sticks; stable on re-run
+        let keep: Vec<Lobe> = g.lobes.iter().filter(|l| l.folder.as_deref() != Some("Uni")).cloned().collect();
+        s.save_lobes(&keep).unwrap();
+        let g2 = s.graph().unwrap();
+        assert!(!g2.lobes.iter().any(|l| l.folder.as_deref() == Some("Uni")));
+        assert_eq!(g2.lobes.len(), keep.len());
+    }
+
+    #[test]
     fn lobes_validate() {
         let (_t, s) = setup();
         let mut lobes = s.lobes().unwrap();
-        lobes.push(Lobe { id: "sec".into(), name: "Dup".into(), color: "#000".into() });
+        lobes.push(Lobe { id: "sec".into(), name: "Dup".into(), color: "#000".into(), folder: None });
         assert!(s.save_lobes(&lobes).is_err());
         lobes.pop();
         lobes[0].name = "Security".into();

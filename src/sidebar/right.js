@@ -15,7 +15,7 @@ import { eachWikilink, linkTarget } from "../lib/wikilinks.js";
 import { deleteItem } from "../actions.js";
 import { toast } from "../shell/toast.js";
 
-const KNOWN = new Set(["id", "type", "lobe", "title", "tags", "inline_tags", "body", "path", "created", "updated", "degree"]);
+const KNOWN = new Set(["id", "type", "lobe", "lobe_from", "title", "tags", "inline_tags", "body", "path", "created", "updated", "degree"]);
 const LAYOUT = /^(x|y|z|vx|vy|vz|fx|fy|fz|index|__.*)$/;
 const unwiki = s => s.replace(/!?\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_, t, a) => a || t.split("#")[0]);
 
@@ -124,7 +124,7 @@ export function initRightSidebar() {
     const synced = n.type === "project" && !!n.pushed_at;
     return `<div class="props-form">
       <label class="prop"><span>type</span><select data-prop="type">${TYPES.map(t => `<option value="${t.id}" ${t.id === n.type ? "selected" : ""}>${t.one}</option>`).join("")}</select></label>
-      <label class="prop"><span>lobe</span><select data-prop="lobe">${lobes.map(l => `<option value="${esc(l.id)}" ${l.id === n.lobe ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
+      <label class="prop" ${n.lobe_from === "folder" ? `title="From the folder; pick one to set it on this note"` : ""}><span>lobe${n.lobe_from === "folder" ? `<small class="faint"> (folder)</small>` : ""}</span><select data-prop="lobe">${lobes.map(l => `<option value="${esc(l.id)}" ${l.id === n.lobe ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
       <div class="prop"><span>tags</span><div class="tag-edit">
         ${(n.tags || []).map(t => `<span class="tag">#${esc(t)}<button type="button" data-untag="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("x", { size: 11 })}</button></span>`).join("")}
         ${inline.map(t => `<span class="tag tag-inline" title="Written as #${esc(t)} in the note">#${esc(t)}</span>`).join("")}

@@ -48,12 +48,12 @@ export function settingsTab(pane) {
       ${row("Theme", "", `<select class="input" data-path="theme"><option value="dark">Dark</option><option value="light">Light</option></select>`)}
 
       <h2>Lobes</h2>
-      <p class="set-desc">Lobes group the graph by colour. Items in a removed lobe move to Unsorted.</p>
+      <p class="set-desc">Lobes group the graph by colour. Each top-level folder gets one automatically (shown with a /); a note's own <code>lobe:</code> wins. Items in a removed lobe move to Unsorted.</p>
       <div class="lobe-list">${lobes.map((l, i) => `
         <div class="lobe-row" data-i="${i}">
           <input type="color" value="${esc(l.color)}" data-lobe="color" aria-label="Colour" />
           <input class="input" value="${esc(l.name)}" data-lobe="name" aria-label="Name" spellcheck="false" />
-          <span class="faint lobe-id" title="id used in frontmatter">${esc(l.id)}</span>
+          <span class="faint lobe-id" title="${l.folder ? `Items in the ${esc(l.folder)}/ folder use this lobe` : "id used in frontmatter"}">${l.folder ? `${esc(l.folder)}/` : esc(l.id)}</span>
           <span class="count">${counts.get(l.id) || 0}</span>
           <button type="button" class="icon-btn" data-act="lobe-del" title="Remove lobe">${icon("trash", { size: 14 })}</button>
         </div>`).join("")}
@@ -177,7 +177,7 @@ export function settingsTab(pane) {
       // new lobes get their id from the name
       const used = new Set(lobes.filter(l => !l.fresh).map(l => l.id));
       const out = lobes.map(l => {
-        if (!l.fresh) return { id: l.id, name: l.name.trim(), color: l.color };
+        if (!l.fresh) return { id: l.id, name: l.name.trim(), color: l.color, ...(l.folder ? { folder: l.folder } : {}) };
         let id = slug(l.name), i = 2;
         while (used.has(id)) id = `${slug(l.name)}-${i++}`;
         used.add(id);

@@ -213,7 +213,7 @@ export function initLeftSidebar({ graph }) {
         <div class="side-label">Lobes</div>
         ${lobes.map(l => {
           const c = items.filter(n => n.lobe === l.id).length;
-          if (!c && l.id === UNSORTED.id) return "";
+          if (!c) return ""; // lobes with no items (e.g. unused sample lobes) stay out of the way
           return `<button type="button" class="row" data-lobe="${esc(l.id)}" title="Fly to lobe">
             <span class="dot" style="background:${l.color}"></span><span class="row-title">${esc(l.name)}</span><span class="count">${c}</span></button>`;
         }).join("")}
