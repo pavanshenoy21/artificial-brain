@@ -49,11 +49,17 @@ test("blend: both signals beat one; weak semantic-only hits are dropped", () => 
   assert.deepEqual(out.map(x => x.id), ["b", "a", "c"]);
 });
 
-test("lobe centres are distinct and unsorted sits in the middle", () => {
-  const c = lobeCenters([{ id: "x" }, { id: "y" }, { id: "z" }]);
-  assert.deepEqual(c.get("unsorted"), [0, 0, 0]);
-  const xy = ["x", "y", "z"].map(id => c.get(id).slice(0, 2).map(v => Math.round(v)).join());
-  assert.equal(new Set(xy).size, 3);
+test("lobe centres fill a disc: biggest lobe in the middle, all distinct", () => {
+  const lobes = Array.from({ length: 12 }, (_, i) => ({ id: `l${i}` }));
+  const counts = new Map(lobes.map((l, i) => [l.id, i + 1]));
+  const c = lobeCenters(lobes, counts);
+  assert.deepEqual(c.get("l11").slice(0, 2), [0, 0], "largest at the centre");
+  const r = id => Math.hypot(...c.get(id).slice(0, 2));
+  assert.ok(r("l10") < r("l0"), "bigger lobes closer to the middle");
+  const xy = [...c.values()].map(p => p.slice(0, 2).map(Math.round).join());
+  assert.equal(new Set(xy).size, 13, "12 lobes + Unsorted, no overlaps");
+  for (const a of c.values()) for (const b of c.values())
+    if (a !== b) assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) > 30, "centres keep some room");
 });
 
 test("tag similarity stays fast on a big vault and skips pairs already linked", async () => {

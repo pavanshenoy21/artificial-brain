@@ -227,7 +227,7 @@ export function createGraphView(container) {
   Graph.d3Force("link")
     .distance(l => (l.kind === "explicit" ? 22 : 38))
     .strength(l => (l.kind === "explicit" ? (crossLobe(l) ? 0.03 : 0.35) : crossLobe(l) ? 0.005 : 0.05));
-  Graph.d3Force("lobe", lobeForce(0.1));
+  Graph.d3Force("lobe", lobeForce(0.14));
 
   // ---------------------------------------------------------------- render on demand
   // 3d-force-graph redraws every frame forever. Once the layout has settled
@@ -337,7 +337,9 @@ export function createGraphView(container) {
       return;
     }
     lastShape = shape;
-    centers = lobeCenters(app.lobes);
+    const counts = new Map();
+    for (const n of app.items.values()) counts.set(n.lobe, (counts.get(n.lobe) || 0) + 1);
+    centers = lobeCenters(app.lobes, counts);
     for (const n of app.items.values()) {
       if (n.x !== undefined) continue;
       // new node: start near its lobe so the layout settles fast
