@@ -22,7 +22,7 @@ export const FORMS = {
   ],
   skill: [
     { key: "level", kind: "select", options: ["beginner", "intermediate", "advanced"] },
-    { key: "since", kind: "text", placeholder: "2025 or 2025-08" },
+    { key: "since", kind: "text", placeholder: "e.g. 2025-08" },
     { key: "used_in", kind: "links", label: "Used in", linkType: "project" },
   ],
   hackathon: [

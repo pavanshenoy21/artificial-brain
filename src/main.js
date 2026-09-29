@@ -1,7 +1,7 @@
 // Bootstrap: shell, graph tab, sidebars, palettes, keyboard.
 
 import { app } from "./state.js";
-import { api } from "./api.js";
+import { api, isDesktop } from "./api.js";
 import { left, right, ribbonButton } from "./shell/layout.js";
 import { tabsApi as tabs } from "./shell/tabs.js";
 import { status } from "./shell/statusbar.js";
@@ -193,6 +193,18 @@ try {
   app.emit("vault", { ...vaultInfo, error: vaultInfo.error || String(e) });
 }
 tabs.restore();
+
+// Don't lose the last half-second of typing: flush autosaves when the window
+// is hidden or closed.
+addEventListener("pagehide", () => tabs.saveAll());
+document.addEventListener("visibilitychange", () => { if (document.hidden) tabs.saveAll(); });
+if (isDesktop) {
+  import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
+    getCurrentWindow().onCloseRequested(async () => {
+      await Promise.race([tabs.saveAll(), new Promise(r => setTimeout(r, 2000))]);
+    }),
+  ).catch(e => console.warn("close hook unavailable", e));
+}
 
 // handy for poking around in devtools
 window.brain = { app, api, graph, tabs, setTheme };

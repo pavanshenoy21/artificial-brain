@@ -199,6 +199,6 @@ Esc clear focus / close palette.
   Ask pane), `settings/view.js`, `lib/` (types + forms, lobes, wikilinks, prefs, rank), `capture.html` + `capture.js`,
   `theme.css` + `app.css`.
 - Run: `npm install && npm run tauri dev` (browser only: `npm run dev`, port 1420; `?empty` = empty mock vault).
-- Checks: `npm test`, `npm run build`, `cd src-tauri && cargo test && cargo clippy --all-targets` (all clean).
-- Cloud sessions CAN run the real desktop build headless: install `xvfb xdotool imagemagick dbus-x11`, then
+- Checks: `npm test`, `npm run test:e2e` (Playwright), `npm run build`, `cd src-tauri && cargo test && cargo clippy --all-targets` (all clean).
+- Cloud sessions CAN run the real desktop build headless: install `xvfb xdotool imagemagick dbus-x11` + `pip install python-xlib`, then
   `npx tauri build --no-bundle && scripts/desktop-smoke.sh <out-dir>` (screenshots of the real window).

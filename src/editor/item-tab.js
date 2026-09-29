@@ -102,7 +102,9 @@ export function itemTab(pane, tab) {
     const title = titleInput.value.replace(/\s+/g, " ").trim();
     if (!n || title === n.title) { titleInput.value = n?.title ?? ""; return; }
     if (!title) { titleInput.value = n.title; return; }
-    await save();
+    // flush all tabs: the rename rewrites links in other files, and a later
+    // autosave of stale text would undo that
+    await tabsApi.saveAll();
     try {
       await api.updateItem(tab.id, { title });
       await app.reload();

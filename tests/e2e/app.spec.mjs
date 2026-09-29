@@ -383,6 +383,38 @@ test.describe("regressions", () => {
   });
 });
 
+test.describe("save safety", () => {
+  test("hiding/closing the window flushes typing that hasn't autosaved yet", async ({ page, errors }) => {
+    await openApp(page);
+    const id = await idOf(page, "Docker");
+    await page.evaluate(id => window.brain.app.open(id, { mode: "edit" }), id);
+    await page.locator(".pane:not([hidden]) .cm-content").click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(" LASTWORDS");
+    await page.evaluate(() => dispatchEvent(new Event("pagehide")));
+    await page.waitForTimeout(100); // well under the 500ms autosave
+    const body = await page.evaluate(id => window.brain.api.getItem(id).then(n => n.body), id);
+    expect(body.endsWith(" LASTWORDS")).toBe(true);
+  });
+
+  test("rename saves other open notes first, so the link rewrite sticks", async ({ page, errors }) => {
+    await openApp(page);
+    const other = await idOf(page, "Per-team challenge containers");
+    await page.evaluate(id => window.brain.app.open(id, { mode: "edit" }), other);
+    await page.locator(".pane:not([hidden]) .cm-content").click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(" typed");
+    await page.evaluate(id => window.brain.app.open(id), await idOf(page, "Docker"));
+    const title = page.locator(".pane:not([hidden]) .doc-title-input");
+    await title.fill("Docker and Podman");
+    await title.press("Enter");
+    await page.waitForTimeout(800); // let any pending autosave fire
+    const body = await page.evaluate(id => window.brain.api.getItem(id).then(n => n.body), other);
+    expect(body).toContain("[[Docker and Podman]]");
+    expect(body).toContain(" typed");
+  });
+});
+
 test.describe("graph framing", () => {
   test("after the layout settles the whole graph is in view, lobe labels near their clusters", async ({ page, errors }) => {
     await openApp(page);

@@ -153,6 +153,9 @@ src-tauri/src/           Rust backend
 - All frontend↔backend calls go through `src/api.js`; outside Tauri it uses `src/mock/backend.js`.
 - Tests: `npm test` (frontend, node --test) and `cd src-tauri && cargo test` (Rust, including
   mock-runtime tests against loopback fake AI/GitHub servers; no internet).
+- UI tests: `npm run test:e2e` (Playwright, 33 tests against the browser build + mock backend; any page
+  error fails a test).
 - `cargo clippy --all-targets` is clean.
-- `scripts/desktop-smoke.sh` runs the real release build under Xvfb and takes screenshots.
+- `scripts/desktop-smoke.sh` runs the real release build under Xvfb: import, outside edit (watcher),
+  `--capture`, and typing right before closing the window must reach the file. It takes screenshots.
 - Design and implementation choices are logged in `DECISIONS.md`.

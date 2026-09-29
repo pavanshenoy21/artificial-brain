@@ -113,6 +113,8 @@ export const tabsApi = {
     activate(tabs.find(t => t.key === key) || tabs[0]);
   },
   rect: () => panes.getBoundingClientRect(),
+  // Flush every open editor's pending autosave (before quit, rename, ...).
+  saveAll: () => Promise.all(tabs.map(t => t.view.save?.())).catch(() => {}),
 };
 
 function activate(t) {

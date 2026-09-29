@@ -21,7 +21,9 @@ pub struct AppState {
 
 impl AppState {
     pub fn with_store<T>(&self, f: impl FnOnce(&mut Store) -> Result<T>) -> Result<T> {
-        let mut guard = self.store.lock().map_err(|_| "store lock poisoned")?;
+        // A panic mid-call poisons the lock; the index is only a cache and the
+        // files are written atomically, so carry on rather than failing forever.
+        let mut guard = self.store.lock().unwrap_or_else(|e| e.into_inner());
         match guard.as_mut() {
             Some(s) => f(s),
             None => err(self.open_error.lock().ok().and_then(|e| e.clone()).unwrap_or_else(|| "no vault open".into())),

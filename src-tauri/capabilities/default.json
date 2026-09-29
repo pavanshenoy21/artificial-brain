@@ -12,6 +12,7 @@
     "dialog:default",
     "global-shortcut:default",
     "core:window:allow-hide",
-    "core:window:allow-set-focus"
+    "core:window:allow-set-focus",
+    "core:window:allow-destroy"
   ]
 }
