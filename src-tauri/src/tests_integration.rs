@@ -226,3 +226,142 @@ fn ask_retrieves_expands_and_cites() {
     assert!(a.answer.is_none() && !a.sources.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A vault shaped like a real Obsidian one. Opening it must not modify any
+/// file, and links/tags/lobes/search must come out right.
+#[test]
+fn obsidian_vault_is_read_faithfully_and_left_untouched() {
+    use std::collections::BTreeMap;
+    use std::fs;
+    let dir = std::env::temp_dir().join(format!("brain-obs-{}", crate::vault::new_id()));
+    let v = dir.join("vault");
+    let files: Vec<(&str, &str)> = vec![
+        (".obsidian/app.json", "{}"),
+        (".obsidian/workspace.json", "{\"x\":1}"),
+        ("Commands/Git.md", "---\naliases: [git cheatsheet]\ntags: [cli]\ncreated: 2024-05-01\n---\n# Git\n\n`git rebase -i` #git\n\nSee [[Linux#Shell|shell basics]] and ![[diagram.png]].\n"),
+        ("Commands/Linux.md", "Shell stuff #cli/linux\r\n\r\nBack to [[git cheatsheet]].\r\n"),
+        ("Commands/README.md", "Commands index. [[Git]] [[Linux]]"),
+        ("SIP/README.md", "SIP index, see [[Dashboard]]."),
+        ("SIP/Dashboard.md", "> [!note] Callout\n> body #sip\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"),
+        ("SIP/Sub/Deep note.md", "Nested three levels. #sip"),
+        ("Hackerton 2.0/Idea (v2).md", "Parentheses in the name. Links [[Idea (v2)]] to itself and [[Dashboard]]."),
+        ("EL SEM 3/Broken yaml.md", "---\ntags: [unclosed\ntitle: : :\n---\nBody survives #el"),
+        ("EL SEM 3/Empty.md", ""),
+        ("Misc/Ünïcödé 笔记.md", "Unicode title #misc"),
+        ("Misc/image.png", "not markdown"),
+        ("Misc/paper.pdf", "%PDF"),
+        ("Loose root note.md", "No folder, no tags."),
+        ("Templates/Daily.md", "{{date}} #template"),
+    ];
+    for (p, c) in &files {
+        let f = v.join(p);
+        fs::create_dir_all(f.parent().unwrap()).unwrap();
+        fs::write(&f, c).unwrap();
+    }
+    let snapshot = || -> BTreeMap<String, (Vec<u8>, std::time::SystemTime)> {
+        files.iter().map(|(p, _)| {
+            let f = v.join(p);
+            (p.to_string(), (fs::read(&f).unwrap(), fs::metadata(&f).unwrap().modified().unwrap()))
+        }).collect()
+    };
+    let before = snapshot();
+
+    let mut store = Store::open(&v, &dir.join("brain.db")).unwrap();
+    let r = store.sync().unwrap();
+    assert_eq!(r.updated, 0, "already indexed on open");
+    let g = store.graph().unwrap();
+    assert_eq!(before, snapshot(), "opening the vault changed no file");
+    assert_eq!(g.nodes.len(), 12, "12 markdown files; .obsidian, png and pdf ignored");
+
+    let node = |p: &str| g.nodes.iter().find(|n| n.path == p).unwrap_or_else(|| panic!("missing {p}"));
+    let title_of = |id: &str| g.nodes.iter().find(|n| n.id == id).unwrap().title.clone();
+    let links_from = |p: &str| {
+        let id = &node(p).id;
+        let mut t: Vec<String> = g.links.iter().filter(|l| &l.source == id).map(|l| title_of(&l.target)).collect();
+        t.sort();
+        t
+    };
+
+    // titles, types, tags
+    assert_eq!(node("Commands/Git.md").title, "Git");
+    assert_eq!(node("Misc/Ünïcödé 笔记.md").title, "Ünïcödé 笔记");
+    assert!(g.nodes.iter().all(|n| n.kind == "note"), "user folders are plain notes");
+    assert_eq!(node("Commands/Git.md").tags, vec!["cli"]);
+    assert_eq!(node("Commands/Git.md").inline_tags, vec!["git"]);
+    assert_eq!(node("Commands/Linux.md").inline_tags, vec!["cli/linux"], "CRLF file");
+    assert_eq!(node("EL SEM 3/Broken yaml.md").inline_tags, vec!["el"], "bad YAML doesn't lose the body");
+    assert_eq!(node("Commands/Git.md").fields["aliases"], json!(["git cheatsheet"]));
+
+    // links: heading + alias form, aliases, duplicate README names, self-links ignored
+    assert_eq!(links_from("Commands/Git.md"), vec!["Linux"]);
+    assert_eq!(links_from("Commands/Linux.md"), vec!["Git"], "[[alias]] resolves via aliases:");
+    assert_eq!(links_from("Commands/README.md"), vec!["Git", "Linux"]);
+    assert_eq!(links_from("Hackerton 2.0/Idea (v2).md"), vec!["Dashboard"]);
+
+    // folder lobes (top level only), root note unsorted
+    let lobe = |p: &str| node(p).lobe.clone().unwrap_or_default();
+    assert_eq!(lobe("SIP/Sub/Deep note.md"), lobe("SIP/README.md"));
+    assert!(lobe("SIP/README.md").starts_with("folder-"));
+    assert_ne!(lobe("SIP/README.md"), lobe("Commands/README.md"));
+    assert_eq!(lobe("Loose root note.md"), "");
+    let names: Vec<&str> = g.lobes.iter().filter(|l| l.folder.is_some()).map(|l| l.name.as_str()).collect();
+    for f in ["Commands", "SIP", "Hackerton 2.0", "EL SEM 3", "Misc", "Templates"] {
+        assert!(names.contains(&f), "lobe for {f}");
+    }
+
+    // search: unicode, inline tags, callout text
+    assert_eq!(store.search("ünïcödé", 5).unwrap()[0].id, node("Misc/Ünïcödé 笔记.md").id);
+    assert_eq!(store.search("callout", 5).unwrap()[0].id, node("SIP/Dashboard.md").id);
+
+    // rename across folders keeps the file in its folder and rewrites
+    // [[Linux#Shell|shell basics]] and [[Linux]] elsewhere
+    let linux = node("Commands/Linux.md").id.clone();
+    let renamed = store.update(&linux, json!({ "title": "Linux shell" }).as_object().unwrap().clone()).unwrap();
+    assert_eq!(renamed.path, "Commands/Linux shell.md");
+    let git = fs::read_to_string(v.join("Commands/Git.md")).unwrap();
+    assert!(git.contains("[[Linux shell#Shell|shell basics]]"), "{git}");
+    assert!(fs::read_to_string(v.join("Commands/README.md")).unwrap().contains("[[Linux shell]]"));
+    // files that don't link to it are untouched
+    let after = snapshot_of(&v, &["SIP/Dashboard.md", "Misc/Ünïcödé 笔记.md", "EL SEM 3/Broken yaml.md"]);
+    for (p, bytes) in after {
+        assert_eq!(bytes, before[&p].0, "{p} untouched by the rename");
+    }
+    let _ = fs::remove_dir_all(dir);
+}
+
+fn snapshot_of(v: &std::path::Path, paths: &[&str]) -> Vec<(String, Vec<u8>)> {
+    paths.iter().map(|p| (p.to_string(), std::fs::read(v.join(p)).unwrap())).collect()
+}
+
+/// Editing a note from an existing vault changes only what was edited.
+#[test]
+fn edits_to_obsidian_notes_are_minimal() {
+    use std::fs;
+    let dir = std::env::temp_dir().join(format!("brain-min-{}", crate::vault::new_id()));
+    let v = dir.join("vault");
+    fs::create_dir_all(v.join("Uni")).unwrap();
+    fs::write(v.join("Uni/Plain.md"), "Just text #uni\n").unwrap();
+    fs::write(v.join("Uni/Front.md"), "---\naliases: [f]\ncssclass: wide\n---\nBody\n").unwrap();
+    fs::write(v.join("Uni/Windows.md"), "line one\r\nline two\r\n").unwrap();
+    let mut s = Store::open(&v, &dir.join("brain.db")).unwrap();
+    let patch = |b: &str| json!({ "body": b }).as_object().unwrap().clone();
+
+    s.update("Uni/Plain.md", patch("Just text #uni, edited")).unwrap();
+    assert_eq!(fs::read_to_string(v.join("Uni/Plain.md")).unwrap(), "Just text #uni, edited\n", "no frontmatter added");
+
+    s.update("Uni/Front.md", patch("Body 2")).unwrap();
+    assert_eq!(fs::read_to_string(v.join("Uni/Front.md")).unwrap(), "---\naliases:\n- f\ncssclass: wide\n---\n\nBody 2\n");
+
+    s.update("Uni/Windows.md", patch("line one\nline two\nline three")).unwrap();
+    assert_eq!(fs::read_to_string(v.join("Uni/Windows.md")).unwrap(), "line one\r\nline two\r\nline three\r\n", "CRLF kept");
+
+    // tags added in the app go to frontmatter; nothing else appears
+    s.update("Uni/Plain.md", json!({ "tags": ["exam"] }).as_object().unwrap().clone()).unwrap();
+    assert_eq!(fs::read_to_string(v.join("Uni/Plain.md")).unwrap(), "---\ntags:\n- exam\n---\n\nJust text #uni, edited\n");
+
+    // a rename keeps the id stable by writing it, since the path changes
+    let r = s.update("Uni/Plain.md", json!({ "title": "Plain renamed" }).as_object().unwrap().clone()).unwrap();
+    assert_eq!(r.id, "Uni/Plain.md");
+    assert!(fs::read_to_string(v.join("Uni/Plain renamed.md")).unwrap().starts_with("---\nid: Uni/Plain.md\n"));
+    let _ = fs::remove_dir_all(dir);
+}

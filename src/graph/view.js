@@ -25,6 +25,7 @@ export function createGraphView(container) {
         <div class="seg" role="group" aria-label="View" title="2D / 3D (V)">
           <button type="button" data-mode="2d">2D</button><button type="button" data-mode="3d">3D</button>
         </div>
+        <button type="button" class="btn-link" data-act="fit" title="Fit the whole graph in view">Fit</button>
         <label class="check"><input type="checkbox" data-opt="similar" /> Similar</label>
         <label class="check" data-orbit><input type="checkbox" data-opt="orbit" /> Orbit</label>
       </div>
@@ -190,7 +191,12 @@ export function createGraphView(container) {
     .onNodeHover(n => { state.hover = n; el.style.cursor = n ? "pointer" : ""; })
     .onBackgroundClick(() => { if (state.focus) api.clearFocus(); })
     .onEngineTick(() => { engineRunning = true; updateLobes(); positionLinks(); })
-    .onEngineStop(() => { engineRunning = false; positionLinks(); idleSoon(); })
+    .onEngineStop(() => {
+      engineRunning = false;
+      positionLinks();
+      if (!fitted && !userMoved && !state.focus) { fitted = true; fitAll(); }
+      idleSoon();
+    })
     .warmupTicks(80)
     .cooldownTicks(220);
 
@@ -301,20 +307,46 @@ export function createGraphView(container) {
     });
   }
 
+  // Lobe name sits just above the bulk of its cluster: the 75th-percentile
+  // distance, so one stray note doesn't push the label over another lobe.
+  const pct = (arr, p) => { const a = [...arr].sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.floor(p * a.length))] : 0; };
   function updateLobes() {
+    const byLobe = new Map();
+    for (const n of app.items.values()) {
+      if (!state.types.has(n.type)) continue;
+      if (!byLobe.has(n.lobe)) byLobe.set(n.lobe, []);
+      byLobe.get(n.lobe).push(n);
+    }
     for (const fx of lobeFx) {
-      const members = [...app.items.values()].filter(n => n.lobe === fx.lobe.id && state.types.has(n.type));
+      const members = byLobe.get(fx.lobe.id) || [];
       fx.label.visible = members.length > 0;
       if (!members.length) continue;
-      const c = new THREE.Vector3();
-      for (const n of members) c.add(new THREE.Vector3(n.x, n.y, n.z));
-      c.divideScalar(members.length);
-      let r = 0;
-      for (const n of members) r = Math.max(r, c.distanceTo(new THREE.Vector3(n.x, n.y, n.z)));
-      fx.center.copy(c);
-      fx.radius = r + 12;
-      fx.label.position.set(c.x, c.y + fx.radius + 4, c.z);
+      let cx = 0, cy = 0, cz = 0;
+      for (const n of members) { cx += n.x; cy += n.y; cz += n.z; }
+      const c = fx.center.set(cx / members.length, cy / members.length, cz / members.length);
+      const d = members.map(n => Math.hypot(n.x - c.x, n.y - c.y, n.z - c.z));
+      fx.radius = Math.max(...d) + 12;
+      fx.label.position.set(c.x, c.y + pct(d, 0.75) + 9, c.z);
     }
+  }
+
+  // Frame the whole graph once the first layout settles (unless the user has
+  // already moved the camera), so any vault size starts fully in view.
+  let fitted = false;
+  let userMoved = false;
+  function fitAll(ms = 600) {
+    const nodes = [...app.items.values()].filter(n => state.types.has(n.type) && n.x !== undefined);
+    if (!nodes.length) return;
+    const c = new THREE.Vector3();
+    for (const n of nodes) c.add(new THREE.Vector3(n.x, n.y, n.z));
+    c.divideScalar(nodes.length);
+    const r = pct(nodes.map(n => c.distanceTo(new THREE.Vector3(n.x, n.y, n.z))), 0.95) + 25;
+    const cam = Graph.camera();
+    const aspect = el.clientWidth / Math.max(1, el.clientHeight);
+    const half = THREE.MathUtils.degToRad(cam.fov / 2);
+    const dist = Math.max(120, r / Math.sin(Math.min(half, Math.atan(Math.tan(half) * aspect))));
+    const dir = state.flat ? new THREE.Vector3(0, 0, 1) : cam.position.clone().sub(controls.target).normalize();
+    Graph.cameraPosition(c.clone().add(dir.multiplyScalar(dist)), c, reduceMotion() ? 0 : ms);
   }
 
   // ---------------------------------------------------------------- data
@@ -492,8 +524,8 @@ export function createGraphView(container) {
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => { if ((controls.autoRotate = canOrbit())) wake(); }, ms);
   }
-  el.addEventListener("pointerdown", () => { pauseOrbit(); resumeOrbitSoon(); });
-  el.addEventListener("wheel", () => { pauseOrbit(); resumeOrbitSoon(); }, { passive: true });
+  el.addEventListener("pointerdown", () => { userMoved = true; pauseOrbit(); resumeOrbitSoon(); });
+  el.addEventListener("wheel", () => { userMoved = true; pauseOrbit(); resumeOrbitSoon(); }, { passive: true });
 
   // ---------------------------------------------------------------- per frame: semantic zoom
   const tmp = new THREE.Vector3();
@@ -570,6 +602,7 @@ export function createGraphView(container) {
     const b = e.target.closest("[data-mode]");
     if (b) setViewMode(b.dataset.mode === "2d");
     if (e.target.closest('[data-act="clear"]')) api.clearFocus();
+    if (e.target.closest('[data-act="fit"]')) fitAll();
   });
   container.querySelector(".graph-bar").addEventListener("change", e => {
     const opt = e.target.dataset.opt;
@@ -614,6 +647,7 @@ export function createGraphView(container) {
     clearFocus,
     setViewMode,
     toggleView: () => setViewMode(!state.flat),
+    fitAll,
     applyTheme,
     setTypes(types) {
       state.types = new Set(types);

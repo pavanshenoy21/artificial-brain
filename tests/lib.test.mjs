@@ -31,6 +31,9 @@ test("link index resolves by title, file name and path", () => {
   assert.equal(resolve(idx, "skills/B"), "b");
   assert.equal(resolve(idx, "B.md"), "b");
   assert.equal(resolve(idx, "nope"), undefined);
+  const withAlias = linkIndex([{ id: "g", title: "Git", path: "Commands/Git.md", aliases: ["git cheatsheet"] }, { id: "b", title: "B", path: "B.md", alias: "Git" }]);
+  assert.equal(resolve(withAlias, "Git cheatsheet"), "g");
+  assert.equal(resolve(withAlias, "git"), "g", "a real title beats another note's alias");
 });
 
 test("fuzzy: subsequence with word-start bonus", () => {

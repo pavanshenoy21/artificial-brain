@@ -284,7 +284,14 @@ pub fn rebuild_links(db: &Connection) -> Result<()> {
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-    let lookup = link_lookup(rows.iter().map(|(id, path, title, _, _)| (id.as_str(), path.as_str(), title.as_str())));
+    let mut lookup = link_lookup(rows.iter().map(|(id, path, title, _, _)| (id.as_str(), path.as_str(), title.as_str())));
+    // Obsidian `aliases:` also resolve [[links]] (a real title/file name wins on a clash)
+    for (id, _, _, _, fields) in &rows {
+        let fields: Value = serde_json::from_str(fields).unwrap_or(Value::Null);
+        for alias in aliases(&fields) {
+            lookup.entry(alias.to_lowercase()).or_insert_with(|| id.clone());
+        }
+    }
     db.execute("DELETE FROM links WHERE kind = 'explicit'", [])?;
     let mut stmt = db.prepare("INSERT OR IGNORE INTO links (src, dst, kind) VALUES (?1, ?2, 'explicit')")?;
     for (id, _, _, body, fields) in &rows {
@@ -308,6 +315,19 @@ fn extra_text_value(v: &Value) -> String {
         Value::Object(o) => extra_text(o),
         _ => String::new(),
     }
+}
+
+/// `aliases:` / `alias:` from frontmatter, as a YAML list or a single string.
+pub fn aliases(fields: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for key in ["aliases", "alias"] {
+        match fields.get(key) {
+            Some(Value::String(s)) => out.extend(s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty())),
+            Some(Value::Array(a)) => out.extend(a.iter().filter_map(Value::as_str).map(|x| x.trim().to_string()).filter(|x| !x.is_empty())),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// lowercase title / file stem / path (no .md) -> id. Titles go in first so

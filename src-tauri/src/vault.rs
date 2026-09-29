@@ -142,7 +142,12 @@ impl Vault {
         if let Some(dir) = file.parent() {
             fs::create_dir_all(dir)?;
         }
-        write_atomic(file, &render_item(item))
+        let mut text = render_item(item);
+        // keep Windows line endings if the file used them
+        if fs::read(file).map(|b| b.windows(2).any(|w| w == b"\r\n")).unwrap_or(false) {
+            text = text.replace("\r\n", "\n").replace('\n', "\r\n");
+        }
+        write_atomic(file, &text)
     }
 
     /// `<vault>/<type dir>/<stem>.md`, or `<stem> 2.md` … if taken. `current`
@@ -291,15 +296,29 @@ pub fn parse_item(text: &str, rel: &str, stem: &str) -> Item {
     }
 }
 
+/// Frontmatter is kept minimal, so notes from an existing (Obsidian) vault
+/// stay clean: `id` only when it isn't just the file's path, `type` only when
+/// the folder doesn't already imply it, `title` only when the file name had
+/// to drop characters, `tags`/`lobe` only when set. A note with nothing to
+/// say gets no frontmatter block at all.
 pub fn render_item(item: &Item) -> String {
     let mut front = Map::new();
-    front.insert("id".into(), item.id.clone().into());
-    front.insert("type".into(), item.kind.clone().into());
-    front.insert("title".into(), item.title.clone().into());
+    let stem = item.path.rsplit('/').next().unwrap_or("").trim_end_matches(".md");
+    if item.id != item.path {
+        front.insert("id".into(), item.id.clone().into());
+    }
+    if item.kind != type_from_dir(&item.path) {
+        front.insert("type".into(), item.kind.clone().into());
+    }
+    if item.title != stem {
+        front.insert("title".into(), item.title.clone().into());
+    }
     if let Some(l) = &item.lobe {
         front.insert("lobe".into(), l.clone().into());
     }
-    front.insert("tags".into(), item.tags.clone().into());
+    if !item.tags.is_empty() {
+        front.insert("tags".into(), item.tags.clone().into());
+    }
     for (k, v) in &item.fields {
         front.insert(k.clone(), v.clone());
     }

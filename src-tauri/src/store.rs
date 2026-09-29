@@ -199,7 +199,10 @@ impl Store {
         if item.title.trim().is_empty() {
             return err("title can't be empty");
         }
-        item.updated = Some(vault::now());
+        // only notes that already track it (app-made ones) get `updated:` bumped
+        if item.updated.is_some() || item.created.is_some() {
+            item.updated = Some(vault::now());
+        }
 
         let new_stem = md::file_stem_for(&item.title);
         let renamed = item.title != old_title && new_stem != old_stem;

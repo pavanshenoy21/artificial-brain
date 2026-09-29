@@ -69,12 +69,16 @@ fn yaml_to_json(v: serde_yaml::Value) -> Value {
 
 /// Renders frontmatter + body back into a markdown file.
 pub fn render(front: &Map<String, Value>, body: &str) -> String {
-    let yaml = if front.is_empty() {
-        String::new()
-    } else {
-        serde_yaml::to_string(front).unwrap_or_default()
-    };
     let body = body.trim_start_matches(['\n', '\r']);
+    if front.is_empty() {
+        // nothing to put in frontmatter: plain markdown, like a hand-written note
+        let mut out = body.to_string();
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        return out;
+    }
+    let yaml = serde_yaml::to_string(front).unwrap_or_default();
     let mut out = String::with_capacity(yaml.len() + body.len() + 16);
     out.push_str("---\n");
     out.push_str(&yaml);

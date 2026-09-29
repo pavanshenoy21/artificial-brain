@@ -23,6 +23,7 @@ export function registerCoreCommands({ graph, tabs, left, right, search, setThem
   reg({ id: "search", title: "Search", iconName: "search", keys: "Ctrl K", run: search });
   reg({ id: "graph", title: "Show graph", iconName: "graph", keys: "Ctrl G", run: () => tabs.activate("graph") });
   reg({ id: "toggle-view", title: "Toggle 2D / 3D graph", iconName: "graph", keys: "V", run: () => { tabs.activate("graph"); graph.toggleView(); } });
+  reg({ id: "fit-graph", title: "Fit graph in view", iconName: "graph", run: () => { tabs.activate("graph"); graph.fitAll(); } });
   reg({ id: "clear-focus", title: "Clear graph focus", iconName: "graph", keys: "Esc", run: () => graph.clearFocus() });
   reg({ id: "toggle-theme", title: "Toggle light / dark theme", iconName: "sun",
     run: () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") });

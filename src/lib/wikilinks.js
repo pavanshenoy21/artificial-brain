@@ -59,6 +59,10 @@ export function fileStem(title) {
 // Lookup of lowercase title / file stem / path (no .md) → id.
 export function linkIndex(items) {
   const m = new Map();
+  // Obsidian aliases first, so titles, file names and paths win on a clash
+  for (const it of items)
+    for (const a of [].concat(it.aliases ?? [], it.alias ?? []).flatMap(x => String(x).split(",")))
+      if (a.trim()) m.set(a.trim().toLowerCase(), it.id);
   for (const it of items) m.set(it.title.toLowerCase(), it.id);
   for (const it of items) {
     const p = (it.path || "").replace(/\.md$/, "");

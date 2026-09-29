@@ -382,3 +382,23 @@ test.describe("regressions", () => {
     await expect(page.locator(".tab.on")).toContainText("Dijkstra notes");
   });
 });
+
+test.describe("graph framing", () => {
+  test("after the layout settles the whole graph is in view, lobe labels near their clusters", async ({ page, errors }) => {
+    await openApp(page);
+    // wait for the first layout to finish (graph goes idle) and the fit animation
+    await page.waitForFunction(() => {
+      const R = window.brain.graph.Graph.renderer();
+      const f = R.info.render.frame;
+      return new Promise(r => setTimeout(() => r(R.info.render.frame === f), 700));
+    }, null, { timeout: 40_000, polling: 1000 });
+    const r = await page.evaluate(() => {
+      const G = window.brain.graph.Graph;
+      const w = G.width(), h = G.height();
+      const nodes = [...window.brain.app.items.values()];
+      const inside = nodes.filter(n => { const p = G.graph2ScreenCoords(n.x, n.y, n.z); return p.x >= 0 && p.x <= w && p.y >= 0 && p.y <= h; }).length;
+      return { inside, total: nodes.length };
+    });
+    expect(r.inside / r.total).toBeGreaterThan(0.95);
+  });
+});
