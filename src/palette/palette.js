@@ -20,14 +20,19 @@ let mode = null;          // current config
 let results = [];
 let active = 0;
 let runId = 0;
+let latest = Promise.resolve(); // the newest query's run
 
-async function run() {
+function run() {
   const my = ++runId;
-  const r = await mode.source(input.value);
-  if (my !== runId) return; // a newer query finished first
-  results = r;
-  active = 0;
-  render();
+  const m = mode;
+  latest = (async () => {
+    const r = await m.source(input.value);
+    if (my !== runId || mode !== m) return; // a newer query (or another palette) won
+    results = r;
+    active = 0;
+    render();
+  })();
+  return latest;
 }
 
 function render() {
@@ -45,7 +50,11 @@ function setActive(i) {
   list.children[active]?.scrollIntoView({ block: "nearest" });
 }
 
-function pick(i, ev) {
+async function pick(i, ev) {
+  // Enter right after typing: wait for that query's results, not the previous ones
+  const my = runId;
+  await latest;
+  if (!mode || my !== runId) return;
   const r = results[i];
   if (!r) return;
   const m = mode;
@@ -66,6 +75,7 @@ export function openPalette(cfg) {
 
 export function close() {
   if (root.hidden) return;
+  input.blur(); // a focused hidden input would swallow the next shortcut ("/", V, Enter…)
   root.hidden = true;
   const m = mode;
   mode = null;

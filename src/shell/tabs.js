@@ -117,7 +117,13 @@ export const tabsApi = {
 
 function activate(t) {
   if (!t) return;
-  if (active && active !== t) { active.pane.hidden = true; active.view.hide?.(); }
+  if (active && active !== t) {
+    // don't leave keyboard focus inside a pane that's being hidden: keys would
+    // keep typing into the previous note's editor
+    if (active.pane.contains(document.activeElement)) document.activeElement.blur();
+    active.pane.hidden = true;
+    active.view.hide?.();
+  }
   active = t;
   t.pane.hidden = false;
   t.view.show?.();

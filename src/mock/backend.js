@@ -36,12 +36,16 @@ export const DEFAULT_SETTINGS = {
 };
 const now = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
 let seq = 0;
-const newId = () => `m${Date.now().toString(36)}${(++seq).toString(36)}`;
+// Deterministic within a page load, so the same sample gets the same ids after a
+// reload (restored tabs keep pointing at the right items).
+const newId = () => `m${(++seq).toString(36)}`;
 
 export function createMockBackend({ seed = true } = {}) {
   const items = new Map();
   let lobes = LOBES.map(l => ({ ...l }));
+  // Settings survive reloads in the preview (like settings.json on desktop).
   let settings = structuredClone(DEFAULT_SETTINGS);
+  try { Object.assign(settings, JSON.parse(localStorage.getItem("brain.mock.settings")) || {}); } catch {}
   const history = [];   // originals kept by AI actions (.brain/history in the real app)
   const needAi = () => { if (!settings.ai.provider) throw new Error("No AI provider set up (Settings → AI provider)."); };
   const listeners = new Set();
@@ -259,6 +263,7 @@ export function createMockBackend({ seed = true } = {}) {
     },
     async saveSettings(next) {
       settings = clone(next);
+      try { localStorage.setItem("brain.mock.settings", JSON.stringify(settings)); } catch {}
       emitEvent("settings-changed", clone(settings));
       return clone(settings);
     },

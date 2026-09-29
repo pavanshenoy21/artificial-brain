@@ -85,7 +85,10 @@ export function createEditor({ parent, doc, onChange, onFollow, resolve, linkOpt
   const wikiComplete = ctx => {
     const before = ctx.matchBefore(/\[\[[^\[\]\n|]*$/);
     if (!before) return null;
-    const after = ctx.state.sliceDoc(ctx.pos, ctx.pos + 2);
+    // Auto-closed brackets after the cursor (e.g. "(" typed inside [[…]] adds ")",
+    // "[[" adds "]]"): the completion replaces them together with the typed text.
+    const line = ctx.state.doc.lineAt(ctx.pos);
+    const tail = /^[)\]}"'`]*?\]\]/.exec(ctx.state.sliceDoc(ctx.pos, line.to));
     return {
       from: before.from + 2,
       validFor: /^[^\[\]\n|]*$/,
@@ -94,8 +97,9 @@ export function createEditor({ parent, doc, onChange, onFollow, resolve, linkOpt
         detail: o.detail,
         type: "text",
         apply: (view, _c, from, to) => {
-          const insert = o.apply + (after === "]]" ? "" : "]]");
-          view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length + (after === "]]" ? 2 : 0) } });
+          const end = tail ? to + tail[0].length : to;
+          const insert = o.apply + "]]";
+          view.dispatch({ changes: { from, to: end, insert }, selection: { anchor: from + insert.length } });
         },
       })),
     };
