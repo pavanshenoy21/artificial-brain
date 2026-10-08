@@ -15,6 +15,7 @@ import { status } from "../shell/statusbar.js";
 import { tabsApi } from "../shell/tabs.js";
 import { editorMenu, itemMenu } from "../ai/actions.js";
 import { canvasTab } from "../canvas/view.js";
+import { toggleTask } from "../lib/tasks.js";
 
 md.resolveWikilink = target => app.resolve(target);
 
@@ -172,6 +173,19 @@ export function itemTab(pane, tab) {
 
   pane.addEventListener("click", e => {
     if (e.target.closest('[data-act="mode"]')) { setMode(mode === "edit" ? "read" : "edit"); return; }
+    const box = e.target.closest("input.task-box");
+    if (box && reading.contains(box)) {
+      // tick a task from the reading view: flip that line in the note
+      const line = +box.dataset.line;
+      const next = toggleTask(editor.value, line);
+      if (line >= 0 && next !== editor.value) {
+        editor.setValue(next);
+        dirty = true;
+        renderReading();
+        save();
+      }
+      return;
+    }
     const w = e.target.closest("a.wikilink");
     if (w) { e.preventDefault(); followLink(w.dataset.target); return; }
     const a = e.target.closest("a[data-ext]");

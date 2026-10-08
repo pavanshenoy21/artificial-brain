@@ -145,3 +145,11 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - File cards show the note's rendered markdown; image files are shown straight from the vault through Tauri's asset protocol, scoped at runtime to the open vault folder only. Link cards show the URL (no iframes: no remote content in the app).
 - Notes can be dragged from the file list onto a canvas.
 - The graph's type filter remembers which types were hidden, so a type added later (canvas) starts visible for existing installs.
+
+## Brain features (after the milestones)
+- Flashcards use the Obsidian Spaced Repetition plugin's one-line syntax (`question :: answer`), so cards written in Obsidian work here and the other way round. The schedule (SM-2: 1 day, 3 days, then interval × ease) is kept in `.brain/review.json` instead of comments in the note, so notes stay clean and git diffs stay quiet. A card's key is note id + normalised question, so editing the answer keeps its history. Up to 20 new cards a day; "Again" brings a card back in the same session (at most 3 times).
+- Tasks are plain markdown `- [ ]` items. Due dates are read in the common Obsidian forms (`📅 date` from the Tasks plugin, `due: date`, `@date`); no new syntax. Ticking a task anywhere (Tasks pane, reading view, canvas) flips only that one character in the file, after flushing open editors.
+- Daily notes go to `daily/YYYY-MM-DD.md` with `tags: [daily]` (so they don't fill the Inbox). If a note with that date as its name already exists anywhere (an Obsidian daily-notes folder), that one opens instead.
+- Unlinked mentions match the note's title, file name and aliases as whole words (3+ characters), skipping code, URLs and existing links. "Link" rewrites only the first mention, as `[[Name|text as written]]` when the case differs.
+- Small `.brain/<name>.json` state files go through two generic commands (`get_brain_state` / `set_brain_state`) with names restricted to `[A-Za-z0-9_-]`, so nothing outside `.brain/` can be reached and lobes.json can't be clobbered through them.
+- Canvases are left out of the Inbox (they can't hold tags) and of the AI text actions.

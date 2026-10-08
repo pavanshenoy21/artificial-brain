@@ -19,8 +19,19 @@ Main target: Fedora (GNOME, Wayland). Works on other Linux distros, macOS and Wi
   Solid lines are your `[[wikilinks]]`; faint dashed lines are suggestions.
 - **Editor.** CodeMirror markdown editor with autosave, reading view, `[[` autocomplete,
   Ctrl+click to follow a link (a missing target is created), renames that rewrite links everywhere.
-- **Sidebars.** Files by type, tags, Inbox (untagged items), graph filters; properties (forms per
-  type), outgoing links, backlinks with context, suggested items, and Ask.
+- **Sidebars.** Files (real folders or by type), tags, Inbox (untagged items), Tasks, graph filters;
+  properties (forms per type), outgoing links, backlinks with context, unlinked mentions (one click
+  turns a mention into a `[[link]]`), suggested items, and Ask.
+- **Canvas.** Obsidian `.canvas` files open as boards: text cards (markdown), cards that show a note
+  or an image from the vault, link cards, groups, and arrows between them. Double-click to add or
+  edit, drag a card's side dot to connect, Ctrl+scroll to zoom, colours, undo. Saved in Obsidian's
+  own JSON format, so the same board opens in both apps. Notes on a canvas list it as a backlink.
+- **Review (flashcards).** Write `question :: answer` on a line in any note. Review shows the cards
+  that are due and spaces them out (SM-2: 1 day, 3 days, then longer the better you know it).
+  The schedule lives in `.brain/review.json`, so notes stay clean. The status bar shows how many are due.
+- **Tasks.** Every `- [ ]` in the vault in one list, grouped by due date (`📅 2026-10-12`,
+  `due: 2026-10-12` or `@2026-10-12`). Tick them there, in the reading view or on a canvas.
+- **Daily notes.** Ctrl Shift D opens today's note (`daily/YYYY-MM-DD.md`); yesterday/tomorrow from Ctrl P.
 - **Typed items.** Skills (level, since, used in), hackathons (date, role, team, built, stack, …),
   projects (status, role, stack + GitHub fields), links (url, site, summary).
 - **Quick capture.** A small window (Ctrl Shift Space, or `brain --capture`): paste a URL and press
@@ -101,6 +112,7 @@ read access to Contents and Metadata, paste it in Settings → GitHub, then "Syn
 | Ctrl K or / | Search |
 | Ctrl P | Commands |
 | Ctrl N | New note |
+| Ctrl Shift D | Today's daily note |
 | Ctrl G | Graph |
 | Ctrl E | Edit / reading view |
 | Ctrl W | Close tab |
@@ -110,13 +122,20 @@ read access to Contents and Metadata, paste it in Settings → GitHub, then "Syn
 | V | 2D / 3D (graph) |
 | Enter / double-click | Open the selected node in a tab |
 | Esc | Clear focus, close a palette or dialog |
+| Space, then 1–4 | Review: show the answer, then Again / Hard / Good / Easy |
+
+On a canvas: double-click (new card / edit), drag empty space (pan), Shift drag (select), Ctrl scroll
+(zoom), Delete, Ctrl Z / Ctrl Shift Z, Ctrl D (duplicate), Ctrl A, arrows (nudge), Enter (edit).
 
 ## Vault format
 
 ```
 ~/Brain/
   notes/ links/ skills/ hackathons/ projects/   one markdown file per item, named after its title
+  canvases/*.canvas                             new canvases (any .canvas anywhere in the vault works)
+  daily/YYYY-MM-DD.md                           daily notes
   .brain/lobes.json                             lobes (id, name, colour), editable in Settings
+  .brain/review.json                            flashcard schedule
   .brain/history/                               originals kept by AI actions
   .trash/                                       deleted items (never hard-deleted)
 ```

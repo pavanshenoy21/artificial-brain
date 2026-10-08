@@ -18,6 +18,7 @@ import { status } from "../shell/statusbar.js";
 import { tabsApi } from "../shell/tabs.js";
 import { openSearch } from "../palette/search.js";
 import { followLink } from "../editor/item-tab.js";
+import { toggleTask } from "../lib/tasks.js";
 import {
   PRESETS, PRESET_NAMES, colorOf, newId, normalize, edgePath, curve, anchor, arrowHead, nearestSide,
   bounds, inside, intersects, drawOrder, fitView, isImage, SIDES,
@@ -403,6 +404,27 @@ export function canvasTab(pane, tab) {
     return [...out];
   }
 
+  // a checkbox on a text card ticks that card; on a note card, the note itself
+  async function toggleCardTask(id, line) {
+    const n = byId.get(id);
+    if (!n || line < 0) return;
+    if (n.type === "text") {
+      const next = toggleTask(n.text || "", line);
+      if (next !== n.text) commit(() => { n.text = next; });
+      return;
+    }
+    const it = n.type === "file" && fileItem(n.file);
+    if (!it) return;
+    try {
+      await tabsApi.saveAll();
+      const fresh = await api.getItem(it.id);
+      await api.updateItem(it.id, { body: toggleTask(fresh.body, line) });
+      await app.reload();
+    } catch (e) {
+      toast(`Couldn't update the task: ${e}`, "error");
+    }
+  }
+
   // ---------------------------------------------------------------- inline editing
   function startEdit(id) {
     const n = byId.get(id) || data.nodes.find(x => x.id === id);
@@ -579,7 +601,9 @@ export function canvasTab(pane, tab) {
       else {
         // a plain click: follow links inside the card
         const a = d.target.closest?.("a");
-        if (a?.classList.contains("wikilink")) followLink(a.dataset.target);
+        const box = d.target.closest?.("input.task-box");
+        if (box) toggleCardTask(d.id, +box.dataset.line);
+        else if (a?.classList.contains("wikilink")) followLink(a.dataset.target);
         else if (a?.hasAttribute("data-ext")) openExternal(a.getAttribute("href"));
         else render();
       }
@@ -606,7 +630,7 @@ export function canvasTab(pane, tab) {
   on(viewEl, "pointerup", endDrag);
   on(viewEl, "pointercancel", endDrag);
   // links inside cards are handled on pointerup; never navigate
-  on(viewEl, "click", e => { if (e.target.closest("a")) e.preventDefault(); });
+  on(viewEl, "click", e => { if (e.target.closest("a, input.task-box")) e.preventDefault(); });
 
   on(viewEl, "dblclick", e => {
     if (!loaded) return;

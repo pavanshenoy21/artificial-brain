@@ -16,13 +16,14 @@ import { typeIcon } from "./icons.js";
 import { esc, reduceMotion } from "./util.js";
 import { prefs } from "./lib/prefs.js";
 import { initEmptyState } from "./shell/empty.js";
-import { newItem } from "./actions.js";
+import { newItem, newCanvas, openDaily } from "./actions.js";
 import { openCommands } from "./palette/commands.js";
 import { registerCoreCommands } from "./core-commands.js";
 import { settingsTab, PROVIDERS } from "./settings/view.js";
 import { setSemanticSearch } from "./palette/search.js";
 import { registerCommand } from "./palette/commands.js";
 import { initAsk } from "./ai/ask.js";
+import { reviewTab, initReviewStatus } from "./review/view.js";
 
 // ------------------------------------------------------------------ tabs + graph
 let graph;
@@ -35,6 +36,9 @@ tabs.register("graph", pane => {
 });
 tabs.register("item", itemTab);
 tabs.register("settings", settingsTab);
+tabs.register("review", reviewTab);
+const openReview = () => tabs.openView("review", { title: "Review", iconName: "review" });
+app.on("open-review", openReview);
 const openSettings = () => tabs.openView("settings", { title: "Settings", iconName: "settings" });
 tabs.addGraph();
 
@@ -91,6 +95,9 @@ ribbonButton({ iconName: "graph", title: "Graph (Ctrl G)", onClick: () => tabs.a
 ribbonButton({ iconName: "command", title: "Commands (Ctrl P)", onClick: openCommands });
 ribbonButton({ iconName: "plus", title: "New note (Ctrl N)", onClick: () => newItem("note") });
 ribbonButton({ iconName: "capture", title: "Quick capture (Ctrl Shift Space)", onClick: () => api.openCapture() });
+ribbonButton({ iconName: "calendar", title: "Today's note (Ctrl Shift D)", onClick: () => openDaily(0) });
+ribbonButton({ iconName: "canvas", title: "New canvas", onClick: () => newCanvas() });
+ribbonButton({ iconName: "review", title: "Review flashcards", onClick: openReview });
 
 ribbonButton({
   iconName: "sun", title: "Toggle theme", bottom: true,
@@ -99,6 +106,12 @@ ribbonButton({
 ribbonButton({ iconName: "settings", title: "Settings", bottom: true, onClick: () => openSettings() });
 registerCommand({ id: "settings", title: "Open settings", iconName: "settings", run: () => openSettings() });
 registerCommand({ id: "ask", title: "Ask your notes", iconName: "ask", run: () => ask.focus() });
+registerCommand({ id: "daily", title: "Open today's daily note", iconName: "calendar", keys: "Ctrl Shift D", run: () => openDaily(0) });
+registerCommand({ id: "daily-prev", title: "Open yesterday's daily note", iconName: "calendar", run: () => openDaily(-1) });
+registerCommand({ id: "daily-next", title: "Open tomorrow's daily note", iconName: "calendar", run: () => openDaily(1) });
+registerCommand({ id: "review", title: "Review flashcards", iconName: "review", run: openReview });
+registerCommand({ id: "show-tasks", title: "Show tasks", iconName: "tasks", run: () => left.show("tasks") });
+initReviewStatus();
 
 // Theme: settings.json is the truth; prefs keep a copy so the first paint is right.
 function applyTheme(t) {
@@ -148,6 +161,7 @@ window.addEventListener("keydown", e => {
   if (mod && k === "w") { e.preventDefault(); tabs.closeActive(); return; }
   if (mod && e.key === "Tab") { e.preventDefault(); tabs.next(e.shiftKey ? -1 : 1); return; }
   if (mod && k === "n" && !e.shiftKey) { e.preventDefault(); newItem("note"); return; }
+  if (mod && e.shiftKey && k === "d") { e.preventDefault(); openDaily(0); return; }
   if (mod && k === "e") { e.preventDefault(); tabs.active?.view.toggleMode?.(); return; }
   if (mod && e.key === "Enter" && !typing()) { e.preventDefault(); app.emit("accept-suggestions"); return; }
   if (typing() || mod || e.altKey) return;

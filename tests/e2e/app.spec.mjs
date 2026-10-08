@@ -313,7 +313,7 @@ test.describe("AI (browser preview fake)", () => {
   test("Ask answers with citations and lights them up in the graph", async ({ page, errors }) => {
     await openApp(page);
     await aiOn(page);
-    await page.getByTitle("Ask").click();
+    await page.getByTitle("Ask", { exact: true }).click();
     await page.locator(".ask-form textarea").fill("How do I isolate team containers?");
     await page.keyboard.press("Enter");
     await expect(page.locator(".ask-answer a.wikilink").first()).toBeVisible({ timeout: 15_000 });
@@ -323,7 +323,7 @@ test.describe("AI (browser preview fake)", () => {
 
   test("Ask without AI lists matching notes", async ({ page, errors }) => {
     await openApp(page);
-    await page.getByTitle("Ask").click();
+    await page.getByTitle("Ask", { exact: true }).click();
     await page.locator(".ask-form textarea").fill("containers");
     await page.keyboard.press("Enter");
     await expect(page.getByText("AI is off. Notes that match:")).toBeVisible();
@@ -575,5 +575,89 @@ test.describe("canvas", () => {
       el.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, clientX: x, clientY: y, bubbles: true, cancelable: true }));
     }, { nid, x: box.x + 200, y: box.y + box.height - 100 });
     await expect.poll(async () => (await stored(page, id)).nodes.some(n => n.file === "links/GTFOBins.md")).toBe(true);
+  });
+});
+
+test.describe("brain features", () => {
+  const leftTab = (page, title) => page.locator(`#left-tabs .side-tab[title^="${title}"]`);
+
+  test("tasks pane lists open tasks by due date; ticking one writes the note", async ({ page, errors }) => {
+    await openApp(page);
+    await leftTab(page, "Tasks").click();
+    const rows = page.locator(".task-row");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toContainText("Submit the DSA lab record");
+    await rows.first().locator(".task-check").click();
+    await expect(rows).toHaveCount(1);
+    const body = (await byTitle(page, "Semester plan")).body;
+    expect(body).toContain("- [x] Submit the DSA lab record due: 2026-10-14");
+    expect(body).toContain("- [ ] Revise paging");
+  });
+
+  test("checkboxes in the reading view tick the task in the note", async ({ page, errors }) => {
+    await openApp(page);
+    await page.evaluate(id => window.brain.app.open(id, { mode: "read" }), await idOf(page, "Semester plan"));
+    const boxes = page.locator(".pane:not([hidden]) .doc-reading .task-box");
+    await expect(boxes).toHaveCount(3);
+    await boxes.nth(0).click();
+    await expect.poll(async () => (await byTitle(page, "Semester plan")).body).toContain("- [x] Revise paging");
+    await expect(page.locator(".pane:not([hidden]) .doc-reading .card-sep")).toHaveCount(3);
+  });
+
+  test("Ctrl Shift D opens today's daily note, creating it once", async ({ page, errors }) => {
+    await openApp(page);
+    const day = await page.evaluate(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; });
+    await page.keyboard.press("Control+Shift+D");
+    await expect(page.locator(".tab.on")).toContainText(day);
+    const n = await byTitle(page, day);
+    expect(n.path).toBe(`daily/${day}.md`);
+    expect(n.tags).toEqual(["daily"]);
+    await page.locator(".tab.on .tab-close").click();
+    await page.keyboard.press("Control+Shift+D");
+    await expect(page.locator(".tab.on")).toContainText(day);
+    expect(await page.evaluate(d => [...window.brain.app.items.values()].filter(n => n.title === d).length, day)).toBe(1);
+  });
+
+  test("review: flashcards from notes, graded with keys, schedule saved", async ({ page, errors }) => {
+    await openApp(page);
+    await expect(page.locator(".st-review")).toHaveText("3 to review");
+    await page.locator(".st-review").click();
+    const card = page.locator(".review-card");
+    await expect(card.locator(".review-q")).toHaveText("What is a page fault?");
+    await expect(card.locator(".review-a")).toHaveCount(0);
+    await page.keyboard.press("Space");
+    await expect(card.locator(".review-a")).toContainText("isn't in RAM");
+    await page.keyboard.press("3");
+    await expect(card.locator(".review-q")).toHaveText("What is thrashing?");
+    await page.keyboard.press("Space");
+    await page.keyboard.press("1"); // again: comes back this session
+    await expect(card.locator(".review-q")).toHaveText("Four conditions for deadlock?");
+    await page.keyboard.press("Space");
+    await page.keyboard.press("4");
+    await expect(card.locator(".review-q")).toHaveText("What is thrashing?");
+    await page.keyboard.press("Space");
+    await page.keyboard.press("3");
+    await expect(page.locator(".review-empty")).toContainText("Nothing to review");
+    await expect(page.locator(".st-review")).toHaveCount(0);
+    const st = await page.evaluate(() => window.brain.api.getState("review"));
+    const ivals = Object.values(st.cards).map(c => c.interval).sort();
+    expect(ivals).toEqual([1, 1, 4]);
+    expect(st.newCount).toBe(3);
+  });
+
+  test("unlinked mentions: Link turns the first mention into a link", async ({ page, errors }) => {
+    await openApp(page);
+    const src = await page.evaluate(() => window.brain.api.createItem({ title: "Lab setup", body: "Installed docker on the lab machines. Docker needs sudo." }));
+    await page.evaluate(() => window.brain.app.reload());
+    await page.evaluate(id => window.brain.app.select(id, { source: "list" }), await idOf(page, "Docker"));
+    const sec = page.locator('[data-sec="mentions"]');
+    await expect(sec.locator(".mention-row")).toHaveCount(1);
+    await expect(sec.locator(".mention-row")).toContainText("Lab setup");
+    await expect(sec.locator("mark")).toHaveText("docker");
+    await sec.locator(".mention-link").click();
+    await expect.poll(async () => (await byTitle(page, "Lab setup")).body).toBe("Installed [[Docker|docker]] on the lab machines. Docker needs sudo.");
+    await expect(sec.locator(".mention-row")).toHaveCount(0);
+    await expect(page.locator('[data-sec="back"] .item-row', { hasText: "Lab setup" })).toHaveCount(1);
+    expect(src.id).toBeTruthy();
   });
 });

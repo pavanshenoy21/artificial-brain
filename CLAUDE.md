@@ -183,7 +183,8 @@ Esc clear focus / close palette.
 - Don't commit secrets, `node_modules`, `dist` or `target`.
 
 ## Current state
-- All 10 milestones are built (see git log, one commit per milestone). `README.md` has setup, features and
+- All 10 milestones are built (see git log, one commit per milestone). Since then: Obsidian canvas
+  support, flashcard review (spaced repetition), tasks, daily notes, unlinked mentions. `README.md` has setup, features and
   shortcuts; `DECISIONS.md` logs every call made along the way; `TODO-PAVVY.md` lists what needs Pavvy.
 - Rust (`src-tauri/src/`): `vault.rs` (files, frontmatter, lobes.json, trash, history), `index.rs` (SQLite: items,
   tags, links, items_fts, embeddings, meta), `store.rs` (sync, CRUD, rename rewriting, import, rebuild),
@@ -191,12 +192,14 @@ Esc clear focus / close palette.
   `watch.rs` (notify watcher), `capture.rs` (capture window, link fetch/extract pipeline), `enrich.rs` (post-save
   hooks), `ai.rs` (OpenAI-compatible client), `embed.rs` (vectors, worker, similar links, semantic search),
   `assist.rs` (Polish/Summarize/Fill form/suggestions), `ask.rs` (RAG answers), `github.rs` (repo sync),
+  `canvas.rs` (Obsidian .canvas JSON: parse, validate, render, rename rewriting),
   `commands.rs`, `state.rs`, `error.rs`, `tests_integration.rs` (mock runtime + loopback fake servers).
 - Frontend (`src/`): `main.js` (bootstrap, keys), `state.js` (shared state + events), `api.js` (+ `mock/backend.js`),
   `actions.js`, `core-commands.js`, `shell/` (layout, tabs, statusbar, toast, empty state, menu), `graph/view.js`,
   `sidebar/` (left: files/tags/inbox/filters, right: item), `editor/` (item tab, CodeMirror, markdown-it),
   `palette/` (palette, search, commands), `forms/` (field controls, New … dialog), `ai/` (actions, review dialog,
-  Ask pane), `settings/view.js`, `lib/` (types + forms, lobes, wikilinks, prefs, rank), `capture.html` + `capture.js`,
+  Ask pane), `settings/view.js`, `canvas/` (model + board view), `review/` (flashcard review tab),
+  `lib/` (types + forms, lobes, wikilinks, prefs, rank, tasks, srs, mentions), `capture.html` + `capture.js`,
   `theme.css` + `app.css`.
 - Run: `npm install && npm run tauri dev` (browser only: `npm run dev`, port 1420; `?empty` = empty mock vault).
 - Checks: `npm test`, `npm run test:e2e` (Playwright), `npm run build`, `cd src-tauri && cargo test && cargo clippy --all-targets` (all clean).

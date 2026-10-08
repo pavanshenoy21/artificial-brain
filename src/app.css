@@ -500,3 +500,46 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .cv-msg { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); max-width: 460px; color: var(--muted); text-align: center; }
 .cv-hint { position: absolute; left: 12px; bottom: 10px; font-size: 11.5px; color: var(--faint); pointer-events: none; }
 .cv-hint[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- tasks */
+.markdown li.task-item { list-style: none; margin-left: -1.3em; }
+.markdown li.task-item.done { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+.task-box { margin: 0 6px 0 0; vertical-align: -1px; accent-color: var(--accent); cursor: pointer; }
+.task-group { margin-bottom: 6px; }
+.task-group-label { display: flex; align-items: center; padding: 6px 12px 2px; font-size: 11.5px; color: var(--muted); }
+.task-group-label .count { margin-left: auto; }
+.task-row { align-items: flex-start; gap: 8px; height: auto; padding-top: 4px; padding-bottom: 4px; cursor: pointer; }
+.task-check { margin: 2px 0 0; accent-color: var(--accent); cursor: pointer; flex: none; }
+.task-main { display: flex; flex-direction: column; min-width: 0; }
+.task-text { white-space: normal; word-break: break-word; line-height: 1.35; }
+.task-meta { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.due-overdue { color: var(--danger); }
+.due-today { color: var(--warn); }
+
+/* ---------------------------------------------------------------- unlinked mentions */
+.mention-row { align-items: flex-start; }
+.mention-row mark { background: var(--accent-soft); color: var(--text); border-radius: 2px; }
+.mention-link { margin-left: auto; flex: none; align-self: center; color: var(--accent); }
+
+/* ---------------------------------------------------------------- review */
+.review { min-height: 100%; display: flex; justify-content: center; }
+.review-inner { width: min(680px, 100%); padding: 32px 24px 60px; }
+.review-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+.review-head h2 { font-size: 20px; margin: 0; }
+.review-count { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.review-card { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-raised); padding: 14px 20px 18px; }
+.review-src { display: inline-flex; align-items: center; gap: 6px; padding: 0; font-size: 12px; margin-bottom: 10px; }
+.review-q { font-size: 18px; line-height: 1.5; }
+.review-a { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 16px; line-height: 1.55; }
+.review-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.review-actions kbd, .grade kbd { font: 11px var(--mono); color: var(--faint); border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px; }
+.btn.primary kbd { color: inherit; border-color: currentColor; opacity: .7; }
+.grade { flex: 1; justify-content: center; height: 34px; }
+.grade small { color: var(--muted); font-size: 11.5px; }
+.grade-1 span { color: var(--danger); }
+.review-meta { margin-top: 10px; font-size: 12px; }
+.review-empty { color: var(--muted); }
+.review-empty pre { font: 13px var(--mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; color: var(--text); white-space: pre-wrap; }
+.st-review { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.st-review:hover { text-decoration: underline; }
+.card-sep { color: var(--accent); font: 600 .9em var(--mono); margin: 0 .45em; }

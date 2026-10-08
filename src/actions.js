@@ -5,6 +5,7 @@ import { app } from "./state.js";
 import { TYPE } from "./lib/types.js";
 import { toast } from "./shell/toast.js";
 import { importSampleCanvas } from "./data/sample-canvas.js";
+import { today, addDays } from "./lib/tasks.js";
 
 // "Untitled", "Untitled 2", … so new titles never collide (wikilinks resolve by title).
 export function uniqueTitle(base) {
@@ -21,6 +22,22 @@ export async function newItem(type = "note", fields = {}) {
     return item;
   } catch (e) {
     toast(`Couldn't create: ${e}`, "error");
+  }
+}
+
+// Daily notes: daily/YYYY-MM-DD.md (an existing note with that date as its
+// name, anywhere in the vault, is used instead, e.g. from Obsidian).
+export async function openDaily(offset = 0) {
+  const day = addDays(today(), offset);
+  const existing = [...app.items.values()].find(n => n.type !== "canvas" && (n.title === day || (n.path || "").split("/").pop() === `${day}.md`));
+  if (existing) { app.open(existing.id); return existing; }
+  try {
+    const item = await api.createItem({ title: day, folder: "daily", tags: ["daily"], body: "## Plan\n- [ ] \n\n## Notes\n" });
+    await app.reload();
+    app.open(item.id, { mode: "edit" });
+    return item;
+  } catch (e) {
+    toast(`Couldn't create the daily note: ${e}`, "error");
   }
 }
 

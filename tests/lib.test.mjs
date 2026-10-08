@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import { wikilinks, renameWikilinks, fileStem, linkIndex, resolve } from "../src/lib/wikilinks.js";
 import { fuzzy, blend } from "../src/lib/rank.js";
 import { lobeCenters } from "../src/lib/lobes.js";
+import { parseTasks, toggleTask, dueBucket, addDays, openTasks } from "../src/lib/tasks.js";
+import { parseCards, cardKey, schedule, queue, allCards, spanLabel } from "../src/lib/srs.js";
+import { unlinkedMentions, linkMention, namesOf } from "../src/lib/mentions.js";
 import { anchor, nearestSide, facingSide, edgePath, fitView, bounds, inside, drawOrder, normalize, colorOf } from "../src/canvas/model.js";
 
 test("wikilinks: targets, aliases, headings, code is skipped", () => {
@@ -110,4 +113,74 @@ test("canvas model: groups, order, normalize, colours", () => {
   assert.equal(colorOf("4"), "#46a758");
   assert.equal(colorOf("#abc"), "#abc");
   assert.equal(colorOf("nope"), null);
+});
+
+test("tasks: parse, due dates, toggle only the checkbox", () => {
+  const body = "Intro\n- [ ] OS assignment 📅 2026-10-10\n  * [x] read ch. 3\n1. [ ] lab record due: 2026-10-08\n```\n- [ ] not a task\n```\n- [ ]\n- [ ] call @2026-11-01 mom";
+  const t = parseTasks(body);
+  assert.deepEqual(t.map(x => [x.line, x.done, x.text, x.due]), [
+    [1, false, "OS assignment", "2026-10-10"],
+    [2, true, "read ch. 3", null],
+    [3, false, "lab record", "2026-10-08"],
+    [8, false, "call mom", "2026-11-01"],
+  ]);
+  const flipped = toggleTask(body, 1);
+  assert.equal(flipped.split("\n")[1], "- [x] OS assignment 📅 2026-10-10");
+  assert.equal(toggleTask(flipped, 1), body);
+  assert.equal(toggleTask(body, 0), body, "non-task lines are left alone");
+  assert.equal(toggleTask("- [ ] a\r\n- [ ] b", 0), "- [x] a\r\n- [ ] b", "CRLF kept");
+  assert.equal(dueBucket("2026-10-07", "2026-10-08"), "overdue");
+  assert.equal(dueBucket("2026-10-08", "2026-10-08"), "today");
+  assert.equal(dueBucket("2026-10-15", "2026-10-08"), "soon");
+  assert.equal(dueBucket("2026-12-01", "2026-10-08"), "later");
+  assert.equal(addDays("2026-12-30", 3), "2027-01-02");
+  const open = openTasks([{ id: "a", type: "note", body }, { id: "c", type: "canvas", body: "- [ ] x" }]);
+  assert.deepEqual(open.map(x => x.text), ["lab record", "OS assignment", "call mom"]);
+});
+
+test("flashcards: parse, keys, SM-2 schedule, queue", () => {
+  const body = "# OS\n- What is a page fault? :: access to a page not in RAM\nplain line\n`a :: b` in code\n```\nx :: y\n```\nEmpty :: \nTCP vs UDP? :: reliable stream vs datagrams";
+  const cards = parseCards(body);
+  assert.deepEqual(cards.map(c => [c.line, c.q, c.a]), [[1, "What is a page fault?", "access to a page not in RAM"], [8, "TCP vs UDP?", "reliable stream vs datagrams"]]);
+  assert.equal(cardKey("n1", "TCP vs UDP?"), cardKey("n1", "  tcp  vs udp? "));
+  assert.notEqual(cardKey("n1", "TCP vs UDP?"), cardKey("n2", "TCP vs UDP?"));
+
+  const now = "2026-10-08";
+  let s = schedule(undefined, 3, now);
+  assert.deepEqual([s.interval, s.due, s.reps], [1, "2026-10-09", 1]);
+  s = schedule(s, 3, "2026-10-09");
+  assert.equal(s.interval, 3);
+  s = schedule(s, 3, "2026-10-12");
+  assert.equal(s.interval, 8); // 3 * 2.5 rounded
+  const lapse = schedule(s, 1, "2026-10-20");
+  assert.deepEqual([lapse.interval, lapse.reps, lapse.lapses], [1, 0, 1]);
+  assert.ok(lapse.ease < s.ease);
+  assert.equal(schedule(undefined, 4, now).interval, 4);
+  assert.ok(schedule(s, 4, now).interval > schedule(s, 3, now).interval);
+  assert.ok(schedule(s, 2, now).interval < schedule(s, 3, now).interval);
+  assert.equal(spanLabel(3), "3d");
+  assert.equal(spanLabel(30), "4w");
+  assert.equal(spanLabel(400), "1.1y");
+
+  const all = allCards([{ id: "n", type: "note", body }]);
+  const st = { cards: { [all[0].key]: { due: "2026-10-01" } } };
+  assert.deepEqual(queue(all, st, now).map(c => c.q), ["What is a page fault?", "TCP vs UDP?"]);
+  assert.deepEqual(queue(all, { cards: { [all[0].key]: { due: "2026-10-30" } }, newDay: now, newCount: 20 }, now), []);
+});
+
+test("unlinked mentions: whole words, not in links or code; linking keeps the text", () => {
+  const target = { id: "d", title: "Docker", path: "skills/Docker.md", aliases: ["containers"] };
+  const items = [
+    target,
+    { id: "a", body: "We ran docker compose and Docker again." },
+    { id: "b", body: "Already [[Docker]] linked, docker." },
+    { id: "c", body: "dockerfile and `docker ps` and https://docker.com/x and [x](https://docker.io)" },
+    { id: "e", body: "Spin up containers per team." },
+  ];
+  const out = unlinkedMentions(target, items, id => id === "b");
+  assert.deepEqual(out.map(m => [m.id, m.text, m.count]), [["a", "docker", 2], ["e", "containers", 1]]);
+  const a = out[0];
+  assert.equal(linkMention(items[1].body, a.index, a.length, "Docker"), "We ran [[Docker|docker]] compose and Docker again.");
+  assert.equal(linkMention("Use Docker.", 4, 6, "Docker"), "Use [[Docker]].");
+  assert.deepEqual(namesOf({ title: "Go", path: "notes/Go.md" }), []);
 });

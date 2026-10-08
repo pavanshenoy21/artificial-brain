@@ -14,6 +14,8 @@ import { esc, openExternal, setHtml } from "../util.js";
 import { eachWikilink, linkTarget } from "../lib/wikilinks.js";
 import { deleteItem } from "../actions.js";
 import { toast } from "../shell/toast.js";
+import { tabsApi } from "../shell/tabs.js";
+import { unlinkedMentions, linkMention } from "../lib/mentions.js";
 
 const KNOWN = new Set(["id", "type", "lobe", "lobe_from", "title", "tags", "inline_tags", "body", "path", "created", "updated", "degree"]);
 const LAYOUT = /^(x|y|z|vx|vy|vz|fx|fy|fz|index|__.*)$/;
@@ -139,6 +141,36 @@ export function initRightSidebar() {
     </div>`;
   }
 
+  // Notes that name this one without linking it; "Link" makes the first mention a [[link]].
+  function mentionsHtml(n) {
+    const found = unlinkedMentions(n, app.items.values(), id => app.outgoing(id).some(e => e.id === n.id));
+    const rows = found.slice(0, 30).map(m => {
+      const o = app.items.get(m.id);
+      return `<div class="row mention-row item-row has-ctx" data-id="${esc(m.id)}" title="${esc(o.title)}">
+        ${typeIcon(o.type, app.lobeOf(o).color, 11)}<span class="row-main"><span class="row-title">${esc(o.title)}${m.count > 1 ? ` <span class="faint">×${m.count}</span>` : ""}</span>
+        <span class="row-ctx">${esc(m.before)}<mark>${esc(m.text)}</mark>${esc(m.after)}</span></span>
+        <button type="button" class="btn-link mention-link" data-link-mention="${esc(m.id)}" title="Turn the first mention into a link">Link</button></div>`;
+    });
+    return section("mentions", "Unlinked mentions", "link", found.length, rows.join("") || `<div class="empty-note">None</div>`);
+  }
+
+  async function linkFirstMention(targetId, sourceId) {
+    const target = app.items.get(targetId);
+    if (!target) return;
+    try {
+      await tabsApi.saveAll();
+      const src = await api.getItem(sourceId);
+      const [m] = unlinkedMentions(target, [src], () => false);
+      if (!m) throw new Error("the mention is gone");
+      const name = (target.path || "").split("/").pop().replace(/\.md$/, "") || target.title;
+      await api.updateItem(sourceId, { body: linkMention(src.body, m.index, m.length, name) });
+      await app.reload();
+      toast(`Linked in "${src.title}"`);
+    } catch (e) {
+      toast(`Couldn't link: ${e.message || e}`, "error");
+    }
+  }
+
   function render(force = false) {
     // don't yank an input away while the user is typing in it
     if (pane.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
@@ -171,6 +203,7 @@ export function initRightSidebar() {
       ${section("props", "Properties", "filters", null, propsHtml(n))}
       ${section("out", "Outgoing links", "outgoing", out.length, linkRows(out))}
       ${section("back", "Backlinks", "backlinks", back.length, linkRows(back, true))}
+      ${n.type === "canvas" ? "" : mentionsHtml(n)}
       ${section("sim", "Suggested", "suggested", sim.length, linkRows(sim))}
       <div class="item-foot">${n.path ? esc(n.path) : ""}${n.updated ? ` · updated ${esc(String(n.updated).slice(0, 10))}` : ""}</div>`, force);
   }
@@ -192,6 +225,8 @@ export function initRightSidebar() {
     const act = e.target.closest("[data-act]")?.dataset.act;
     const n = app.items.get(app.selected);
     if (!n) return;
+    const lm = e.target.closest("[data-link-mention]");
+    if (lm) { linkFirstMention(n.id, lm.dataset.linkMention); return; }
     if (act === "open") app.open(n.id);
     else if (act === "url") openExternal(n.url);
     const ou = e.target.closest("[data-open-url]");

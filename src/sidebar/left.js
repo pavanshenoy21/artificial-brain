@@ -1,4 +1,4 @@
-// Left sidebar: Files (grouped by type), Tags, Filters (types, lobes, similar).
+// Left sidebar: Files (folders or types), Tags, Inbox, Tasks, Filters (types, lobes, similar).
 
 import { app } from "../state.js";
 import { allTags } from "../lib/tags.js";
@@ -9,6 +9,10 @@ import { UNSORTED } from "../lib/lobes.js";
 import { itemMenu } from "../ai/actions.js";
 import { esc, setHtml } from "../util.js";
 import { prefs } from "../lib/prefs.js";
+import { api } from "../api.js";
+import { tabsApi } from "../shell/tabs.js";
+import { toast } from "../shell/toast.js";
+import { openTasks, parseTasks, toggleTask, dueBucket, today } from "../lib/tasks.js";
 
 // Links being fetched / that failed show it in the list.
 const linkState = n =>
@@ -191,7 +195,7 @@ export function initLeftSidebar({ graph }) {
   // Untagged items wait here until they get a tag.
   const inbox = left.add({ id: "inbox", title: "Inbox (untagged)", iconName: "inbox" });
   function renderInbox() {
-    const items = [...app.items.values()].filter(n => !allTags(n).length).sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")) || a.title.localeCompare(b.title));
+    const items = [...app.items.values()].filter(n => n.type !== "canvas" && !allTags(n).length).sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")) || a.title.localeCompare(b.title));
     setHtml(inbox, `<div class="side-label">Inbox<span class="count">${items.length}</span></div>
       <div class="tree">${items.map(n => row(n)).join("") || `<div class="empty-note">Nothing untagged.</div>`}</div>`);
     left.badge("inbox", items.length);
@@ -203,6 +207,54 @@ export function initLeftSidebar({ graph }) {
   inbox.addEventListener("dblclick", e => {
     const r = e.target.closest(".item-row");
     if (r) app.open(r.dataset.id);
+  });
+
+  // ---------------------------------------------------------------- tasks
+  // Every open "- [ ]" in the vault, by due date. Ticking one writes the note.
+  const tasksPane = left.add({ id: "tasks", title: "Tasks", iconName: "tasks" });
+  const BUCKETS = [["overdue", "Overdue"], ["today", "Today"], ["soon", "Next 7 days"], ["later", "Later"], ["none", "No date"]];
+  const dayLabel = d => {
+    const [y, m, dd] = d.split("-").map(Number);
+    return new Date(y, m - 1, dd).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  };
+  function renderTasks() {
+    const now = today();
+    const all = openTasks(app.items.values());
+    const by = new Map(BUCKETS.map(([k]) => [k, []]));
+    for (const t of all) by.get(dueBucket(t.due, now)).push(t);
+    const rowHtml = t => {
+      const n = app.items.get(t.id);
+      return `<div class="row task-row" data-id="${esc(t.id)}" data-line="${t.line}" title="${esc(n.title)}">
+        <input type="checkbox" class="task-check" aria-label="Done: ${esc(t.text)}" />
+        <span class="task-main"><span class="task-text">${esc(t.text || "(no text)")}</span>
+        <span class="task-meta"><span class="dot" style="background:${app.lobeOf(n).color}"></span>${esc(n.title)}${t.due ? ` · <span class="due-${dueBucket(t.due, now)}">${t.due === now ? "today" : dayLabel(t.due)}</span>` : ""}</span></span></div>`;
+    };
+    setHtml(tasksPane, `<div class="side-label">Tasks<span class="count">${all.length}</span></div>
+      ${all.length ? BUCKETS.filter(([k]) => by.get(k).length).map(([k, label]) => `
+        <div class="task-group"><div class="task-group-label ${k === "overdue" ? "due-overdue" : ""}">${label}<span class="count">${by.get(k).length}</span></div>
+        ${by.get(k).map(rowHtml).join("")}</div>`).join("")
+        : `<div class="empty-note">No open tasks. Write "- [ ] something" in any note; add "📅 2026-10-12" or "due: 2026-10-12" for a date.</div>`}`);
+    left.badge("tasks", by.get("overdue").length + by.get("today").length);
+  }
+  tasksPane.addEventListener("click", async e => {
+    const r = e.target.closest(".task-row");
+    if (!r) return;
+    if (!e.target.closest(".task-check")) { app.open(r.dataset.id); return; }
+    e.target.disabled = true;
+    try {
+      await tabsApi.saveAll();
+      const n = await api.getItem(r.dataset.id);
+      const line = +r.dataset.line;
+      const t = parseTasks(n.body).find(x => x.line === line && !x.done);
+      if (!t) throw new Error("the note changed; try again");
+      await api.updateItem(n.id, { body: toggleTask(n.body, line) });
+      await app.reload();
+      toast(`Done: ${t.text}`);
+    } catch (err) {
+      e.target.checked = false;
+      e.target.disabled = false;
+      toast(`Couldn't tick it off: ${err.message || err}`, "error");
+    }
   });
 
   // ---------------------------------------------------------------- filters
@@ -258,7 +310,7 @@ export function initLeftSidebar({ graph }) {
     itemMenu(r.dataset.id, { x: e.clientX, y: e.clientY });
   });
 
-  function renderAll() { renderFiles(); renderTags(); renderInbox(); renderFilters(); }
+  function renderAll() { renderFiles(); renderTags(); renderInbox(); renderTasks(); renderFilters(); }
   app.on("data", renderAll);
   app.on("graph-filters", renderFilters);
   app.on("select", () => {
