@@ -6,6 +6,7 @@ import { LOBES, buildSampleGraph } from "../data/sample.js";
 import { TYPE } from "../lib/types.js";
 import { fileStem, linkIndex, renameWikilinks, resolve, wikilinks } from "../lib/wikilinks.js";
 import { inlineTags, allTags } from "../lib/tags.js";
+import { importSampleCanvas } from "../data/sample-canvas.js";
 
 const MANAGED = new Set(["id", "path", "created", "updated", "degree", "inline_tags"]);
 const CORE = new Set(["id", "type", "lobe", "title", "tags", "inline_tags", "body", "path", "created", "updated"]);
@@ -53,13 +54,58 @@ export function createMockBackend({ seed = true } = {}) {
   const eventListeners = new Map();
   const emitEvent = (event, payload) => eventListeners.get(event)?.forEach(fn => fn(payload));
 
-  function uniquePath(type, title, selfId) {
-    const dir = TYPE[type]?.dir || "notes";
+  function uniquePath(type, title, selfId, folder) {
+    const dir = folder || TYPE[type]?.dir || "notes";
+    const ext = type === "canvas" ? "canvas" : "md";
     const stem = fileStem(title);
     const taken = new Set([...items.values()].filter(i => i.id !== selfId).map(i => i.path.toLowerCase()));
-    let p = `${dir}/${stem}.md`;
-    for (let n = 2; taken.has(p.toLowerCase()); n++) p = `${dir}/${stem} ${n}.md`;
+    let p = `${dir}/${stem}.${ext}`;
+    for (let n = 2; taken.has(p.toLowerCase()); n++) p = `${dir}/${stem} ${n}.${ext}`;
     return p;
+  }
+
+  // ---- canvases (mirrors canvas.rs): JSON kept as-is, body = searchable text
+  function canvasText(data) {
+    return (data.nodes || []).map(n =>
+      n.type === "text" ? (n.text || "").trim()
+      : n.type === "file" && n.file ? `[[${n.file}]]`
+      : n.type === "link" ? (n.url || "").trim()
+      : n.type === "group" ? (n.label || "").trim() : "").filter(Boolean).join("\n\n");
+  }
+  function setCanvas(it, data) {
+    it.__canvas = structuredClone(data);
+    it.body = canvasText(data);
+    it.cards = (data.nodes || []).length;
+  }
+  function validateCanvas(d) {
+    if (!d || typeof d !== "object" || Array.isArray(d)) throw new Error("a canvas must be a JSON object");
+    const ids = new Set();
+    for (const n of d.nodes || []) {
+      if (typeof n.id !== "string" || typeof n.type !== "string") throw new Error("every canvas node needs an id and a type");
+      if (ids.has(n.id)) throw new Error(`duplicate canvas node id "${n.id}"`);
+      ids.add(n.id);
+    }
+    for (const e of d.edges || []) if (!ids.has(e.fromNode) || !ids.has(e.toNode)) throw new Error("every canvas edge needs fromNode and toNode on this canvas");
+  }
+  // after a rename: [[links]] everywhere, file cards and text cards in canvases
+  function rewriteAll(pairs, oldPath, newPath) {
+    const rn = t => pairs.reduce((b, [o, n]) => renameWikilinks(b, o, n), t);
+    for (const other of items.values()) {
+      if (other.type === "canvas") {
+        const d = other.__canvas;
+        let hit = false;
+        for (const n of d.nodes || []) {
+          if (n.type === "file" && n.file === oldPath) { n.file = newPath; hit = true; }
+          if (n.type === "text" && n.text) { const t = rn(n.text); if (t !== n.text) { n.text = t; hit = true; } }
+        }
+        if (hit) setCanvas(other, d);
+        continue;
+      }
+      other.body = rn(other.body);
+      for (const [k, v] of Object.entries(other))
+        if (!CORE.has(k) && Array.isArray(v)) other[k] = v.map(x => (typeof x === "string" ? rn(x) : x));
+        else if (!CORE.has(k) && typeof v === "string") other[k] = rn(v);
+    }
   }
 
   function applyPatch(item, patch) {
@@ -100,7 +146,10 @@ export function createMockBackend({ seed = true } = {}) {
 
   const clone = x => structuredClone(x);
   // what the backend returns for an item: plus its inline #tags (like vault.rs)
-  const view = it => ({ ...structuredClone(it), inline_tags: inlineTags(it.body) });
+  const view = it => {
+    const { __canvas, ...rest } = it;
+    return { ...structuredClone(rest), inline_tags: inlineTags(it.body) };
+  };
   const tagsOf = it => allTags(view(it));
 
   const api = {
@@ -112,10 +161,12 @@ export function createMockBackend({ seed = true } = {}) {
     },
     async createItem(input) {
       const t = now();
+      const { folder, ...rest } = input || {};
+      if (folder && (/(^|\/)\./.test(folder) || folder.startsWith("/"))) throw new Error(`bad folder "${folder}"`);
       const item = { id: newId(), type: "note", lobe: null, title: "", tags: [], body: "", created: t, updated: t };
-      applyPatch(item, input);
+      applyPatch(item, rest);
       if (!item.title) throw new Error("title is required");
-      item.path = uniquePath(item.type, item.title);
+      item.path = uniquePath(item.type, item.title, null, folder?.replace(/\/+$/, ""));
       items.set(item.id, item);
       emit("items");
       return view(item);
@@ -123,28 +174,53 @@ export function createMockBackend({ seed = true } = {}) {
     async updateItem(id, patch) {
       const item = items.get(id);
       if (!item) throw new Error(`no item with id ${id}`);
+      if (item.type === "canvas") return renameCanvas(item, patch);
       const oldTitle = item.title;
+      const oldPath = item.path;
       const oldStem = item.path.split("/").pop().replace(/\.md$/, "");
       applyPatch(item, patch);
       if (!item.title) throw new Error("title can't be empty");
       item.updated = now();
       if (item.title !== oldTitle && fileStem(item.title) !== oldStem) {
-        item.path = uniquePath(item.type, item.title, id);
+        const dir = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/")) : "";
+        item.path = uniquePath(item.type, item.title, id, dir || undefined);
         const newStem = item.path.split("/").pop().replace(/\.md$/, "");
-        const rn = t => {
-          let b = renameWikilinks(t, oldStem, newStem);
-          return oldTitle !== oldStem ? renameWikilinks(b, oldTitle, newStem) : b;
-        };
-        for (const other of items.values()) {
-          other.body = rn(other.body);
-          for (const [k, v] of Object.entries(other))
-            if (!CORE.has(k) && Array.isArray(v)) other[k] = v.map(x => (typeof x === "string" ? rn(x) : x));
-            else if (!CORE.has(k) && typeof v === "string") other[k] = rn(v);
-        }
+        const pairs = [[oldStem, newStem], ...(oldTitle !== oldStem ? [[oldTitle, newStem]] : []),
+          [oldPath.replace(/\.md$/, ""), item.path.replace(/\.md$/, "")]];
+        rewriteAll(pairs, oldPath, item.path);
       }
       emit("items");
       return view(item);
     },
+    async createCanvas(title) {
+      if (!String(title || "").trim()) throw new Error("title is required");
+      const path = uniquePath("canvas", title.trim());
+      const it = { id: path, type: "canvas", lobe: null, title: path.split("/").pop().replace(/\.canvas$/, ""), tags: [], path };
+      setCanvas(it, { nodes: [], edges: [] });
+      items.set(it.id, it);
+      emit("items");
+      return view(it);
+    },
+    async getCanvas(id) {
+      const it = items.get(id);
+      if (!it || it.type !== "canvas") throw new Error("not a canvas");
+      return structuredClone(it.__canvas);
+    },
+    async saveCanvas(id, data) {
+      const it = items.get(id);
+      if (!it || it.type !== "canvas") throw new Error("not a canvas");
+      validateCanvas(data);
+      setCanvas(it, data);
+      emit("canvas");
+      return view(it);
+    },
+    async getState(name) {
+      try { return JSON.parse(localStorage.getItem(`brain.mock.state.${name}`)); } catch { return null; }
+    },
+    async setState(name, value) {
+      try { localStorage.setItem(`brain.mock.state.${name}`, JSON.stringify(value)); } catch {}
+    },
+    fileUrl: () => null,
     async deleteItem(id) {
       items.delete(id);
       emit("items");
@@ -172,6 +248,7 @@ export function createMockBackend({ seed = true } = {}) {
         const it = items.get(id);
         it.body = (it.body ? it.body + "\n\n" : "") + "Related: " + ls.join(", ");
       }
+      await importSampleCanvas(api);
       emit("items");
       return idMap.size;
     },
@@ -359,11 +436,30 @@ export function createMockBackend({ seed = true } = {}) {
     },
   };
 
+  // A canvas has no frontmatter: only its name can change (its id is its path).
+  function renameCanvas(item, patch) {
+    for (const k of Object.keys(patch || {}))
+      if (!["title", "id", "path", "type", "degree", "lobe_from", "inline_tags", "cards"].includes(k)) throw new Error(`a canvas can't store "${k}": only its name can change`);
+    const title = String(patch.title ?? item.title).trim();
+    if (!title) throw new Error("title can't be empty");
+    if (title === item.title) return view(item);
+    const oldPath = item.path;
+    const dir = oldPath.slice(0, oldPath.lastIndexOf("/"));
+    const path = uniquePath("canvas", title, item.id, dir);
+    items.delete(item.id);
+    Object.assign(item, { id: path, path, title: path.split("/").pop().replace(/\.canvas$/, "") });
+    items.set(item.id, item);
+    rewriteAll([[oldPath.split("/").pop(), path.split("/").pop()], [oldPath, path]], oldPath, path);
+    emit("items");
+    return view(item);
+  }
+
   const ready = seed ? api.importSample() : Promise.resolve();
   // every call waits for the seed, so nothing sees a half-filled vault
   const guarded = { onChange: api.onChange, on: api.on };
   for (const [k, fn] of Object.entries(api))
-    if (k !== "onChange" && k !== "on" && k !== "importSample") guarded[k] = async (...a) => { await ready; return fn(...a); };
+    if (!["onChange", "on", "importSample", "fileUrl"].includes(k)) guarded[k] = async (...a) => { await ready; return fn(...a); };
   guarded.importSample = api.importSample;
+  guarded.fileUrl = api.fileUrl;
   return guarded;
 }

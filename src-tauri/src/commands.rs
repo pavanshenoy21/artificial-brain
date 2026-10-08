@@ -177,6 +177,11 @@ pub fn open_store(app: &AppHandle, state: &AppState) {
     if let Ok(mut w) = state.watcher.lock() {
         *w = watch::start(app, &dir);
     }
+    // images on canvases are shown straight from the vault (asset protocol)
+    use tauri::Manager;
+    if let Err(e) = app.asset_protocol_scope().allow_directory(&dir, true) {
+        eprintln!("asset scope: {e}");
+    }
 }
 
 #[derive(Serialize)]
@@ -210,4 +215,41 @@ pub async fn test_embed(state: State<'_, AppState>, settings: Settings) -> Cmd<T
         Ok(v) => TestResult { ok: true, message: format!("Connected. Vectors have {} dimensions.", v.first().map(Vec::len).unwrap_or(0)) },
         Err(e) => TestResult { ok: false, message: e.to_string() },
     })
+}
+
+// ---------------------------------------------------------------- canvases
+
+#[tauri::command]
+pub async fn create_canvas(app: AppHandle, state: State<'_, AppState>, title: String) -> Cmd<Item> {
+    let item = run(&state, |s| s.create_canvas(&title))?;
+    changed(&app, "items");
+    Ok(item)
+}
+
+/// The canvas JSON (JSON Canvas 1.0, as Obsidian writes it).
+#[tauri::command]
+pub async fn get_canvas(state: State<'_, AppState>, id: String) -> Cmd<Value> {
+    run(&state, |s| s.get_canvas(&id))
+}
+
+#[tauri::command]
+pub async fn save_canvas(app: AppHandle, state: State<'_, AppState>, id: String, data: Value) -> Cmd<Item> {
+    let item = run(&state, |s| s.save_canvas(&id, data))?;
+    changed(&app, "canvas");
+    embed::schedule(&app, vec![item.id.clone()]);
+    Ok(item)
+}
+
+// ---------------------------------------------------------------- app state in the vault
+
+/// Small JSON files the app keeps in `<vault>/.brain/<name>.json` (review
+/// schedule, …): they travel with the vault and are ignored by Obsidian.
+#[tauri::command]
+pub async fn get_brain_state(state: State<'_, AppState>, name: String) -> Cmd<Value> {
+    run(&state, |s| s.vault.brain_state(&name))
+}
+
+#[tauri::command]
+pub async fn set_brain_state(state: State<'_, AppState>, name: String, value: Value) -> Cmd<()> {
+    run(&state, |s| s.vault.set_brain_state(&name, &value))
 }

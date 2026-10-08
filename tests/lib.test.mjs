@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { wikilinks, renameWikilinks, fileStem, linkIndex, resolve } from "../src/lib/wikilinks.js";
 import { fuzzy, blend } from "../src/lib/rank.js";
 import { lobeCenters } from "../src/lib/lobes.js";
+import { anchor, nearestSide, facingSide, edgePath, fitView, bounds, inside, drawOrder, normalize, colorOf } from "../src/canvas/model.js";
 
 test("wikilinks: targets, aliases, headings, code is skipped", () => {
   const body = "See [[Foo]] and [[Bar|the bar]], ![[Baz#Part]].\n`[[Nope]]`\n```\n[[AlsoNope]]\n```\n[[Foo]]";
@@ -74,4 +75,39 @@ test("tag similarity stays fast on a big vault and skips pairs already linked", 
   assert.ok(out.length > 0 && out.length <= 6000);
   assert.ok(!out.some(l => [l.source, l.target].sort().join() === "n0,n150"));
   assert.equal(similarityLinks(nodes, [{ source: "n0", target: "n150" }]), out, "cached when nothing changed");
+});
+
+
+test("canvas geometry: anchors, sides, edges, fitting", () => {
+  const a = { x: 0, y: 0, width: 100, height: 50 }, b = { x: 300, y: 0, width: 100, height: 50 };
+  assert.deepEqual(anchor(a, "right"), { x: 100, y: 25 });
+  assert.deepEqual(anchor(a, "top"), { x: 50, y: 0 });
+  assert.equal(nearestSide(b, { x: 290, y: 30 }), "left");
+  assert.equal(facingSide(a, { x: 350, y: 25 }), "right");
+  const g = edgePath(a, undefined, b, undefined);
+  assert.ok(g.d.startsWith("M100,25 C"));
+  assert.deepEqual(g.end, { x: 300, y: 25 });
+  assert.ok(g.endDir.x > 0.99, "arrow points right, into b");
+  assert.ok(Math.abs(g.mid.x - 200) < 1e-9);
+  const r = bounds([a, b]);
+  assert.deepEqual(r, { x: 0, y: 0, width: 400, height: 50 });
+  const cam = fitView(r, 520, 400, 60);
+  assert.equal(cam.z, 1); // fits at 100%, never zooms in past it
+  assert.equal(cam.x, 260 - 200);
+  assert.ok(fitView(r, 300, 400, 60).z < 1);
+});
+
+test("canvas model: groups, order, normalize, colours", () => {
+  const g = { id: "g", type: "group", x: 0, y: 0, width: 500, height: 500 };
+  const big = { id: "G", type: "group", x: -10, y: -10, width: 900, height: 900 };
+  const t = { id: "t", type: "text", x: 10, y: 10, width: 100, height: 100 };
+  assert.ok(inside(t, g) && !inside(g, t) && !inside(g, g));
+  assert.deepEqual(drawOrder([t, g, big]).map(n => n.id), ["G", "g", "t"]);
+  const d = normalize({ nodes: [{ id: "a", type: "text", x: "4.6", width: -1 }], edges: [{ id: "e", fromNode: "a", toNode: "gone" }], extra: 1 });
+  assert.deepEqual(d.nodes[0], { id: "a", type: "text", x: 5, y: 0, width: 250, height: 60 });
+  assert.deepEqual(d.edges, []);
+  assert.equal(d.extra, 1);
+  assert.equal(colorOf("4"), "#46a758");
+  assert.equal(colorOf("#abc"), "#abc");
+  assert.equal(colorOf("nope"), null);
 });

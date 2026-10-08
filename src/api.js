@@ -13,6 +13,15 @@ async function call(cmd, args) {
   return invoke(cmd, args);
 }
 
+// Vault folder + convertFileSrc, so canvases can show images from the vault.
+let fileBase = null;
+let convertFileSrc = null;
+async function rememberVault(info) {
+  if (!convertFileSrc) ({ convertFileSrc } = await import("@tauri-apps/api/core"));
+  fileBase = info?.path ? info.path.replace(/[\\/]+$/, "") : null;
+  return info;
+}
+
 function tauriBackend() {
   return {
     loadGraph: () => call("get_graph"),                       // { nodes, links, lobes }
@@ -26,8 +35,14 @@ function tauriBackend() {
     rebuildIndex: () => call("rebuild_index"),
     listLobes: () => call("list_lobes"),
     saveLobes: lobes => call("save_lobes", { lobes }),
-    vaultInfo: () => call("vault_info"),                      // { path, items, error }
-    openVault: path => call("open_vault", { path }),
+    vaultInfo: () => call("vault_info").then(rememberVault),  // { path, items, error }
+    openVault: path => call("open_vault", { path }).then(rememberVault),
+    fileUrl: rel => (fileBase && convertFileSrc ? convertFileSrc(`${fileBase}/${rel}`) : null),
+    createCanvas: title => call("create_canvas", { title }),
+    getCanvas: id => call("get_canvas", { id }),               // JSON Canvas: { nodes, edges }
+    saveCanvas: (id, data) => call("save_canvas", { id, data }),
+    getState: name => call("get_brain_state", { name }),      // .brain/<name>.json or null
+    setState: (name, value) => call("set_brain_state", { name, value }),
     async pickFolder() {
       const { open } = await import("@tauri-apps/plugin-dialog");
       return open({ directory: true, title: "Choose a vault folder" });

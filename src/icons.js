@@ -3,7 +3,8 @@ import {
   Files, Tags, SlidersHorizontal, Search, Command, Waypoints, FileText, Link, Hexagon, Square, Circle, Diamond,
   Triangle, X, Plus, PanelLeft, PanelRight, Settings, Sun, Moon, RefreshCw, ChevronRight, ChevronDown, ExternalLink,
   ArrowUpRight, ArrowDownLeft, Network, Inbox, Pencil, BookOpen, Trash2, MessageSquare, Info, GitBranch, Zap, Check,
-  FolderOpen, Download, History, Copy, CornerDownLeft,
+  FolderOpen, Download, History, Copy, CornerDownLeft, StickyNote, SquareDashed, Undo2, Redo2, ZoomIn, ZoomOut,
+  RectangleHorizontal, LayoutDashboard, CalendarDays, Brain, ListTodo, ChevronLeft,
 } from "lucide";
 
 const ICONS = {
@@ -13,9 +14,11 @@ const ICONS = {
   "chevron-down": ChevronDown, external: ExternalLink, outgoing: ArrowUpRight, backlinks: ArrowDownLeft,
   suggested: Network, inbox: Inbox, edit: Pencil, read: BookOpen, trash: Trash2, ask: MessageSquare, info: Info,
   github: GitBranch, capture: Zap, check: Check, folder: FolderOpen, download: Download, history: History,
-  copy: Copy, enter: CornerDownLeft,
+  copy: Copy, enter: CornerDownLeft, note: StickyNote, group: SquareDashed, undo: Undo2, redo: Redo2,
+  "zoom-in": ZoomIn, "zoom-out": ZoomOut, canvas: LayoutDashboard, calendar: CalendarDays, review: Brain,
+  tasks: ListTodo, "chevron-left": ChevronLeft,
   // shapes used for item types (same shape as in the graph)
-  circle: Circle, diamond: Diamond, triangle: Triangle, hexagon: Hexagon, square: Square,
+  circle: Circle, diamond: Diamond, triangle: Triangle, hexagon: Hexagon, square: Square, rect: RectangleHorizontal,
 };
 
 const attr = a => Object.entries(a).map(([k, v]) => `${k}="${v}"`).join(" ");
@@ -28,7 +31,7 @@ export function icon(name, { size = 16, cls = "", fill = "none", color = "curren
 }
 
 // Type = shape. Same mapping as the 3D geometries in graph/shapes.js.
-export const TYPE_SHAPE = { note: "circle", link: "diamond", skill: "triangle", hackathon: "hexagon", project: "square" };
+export const TYPE_SHAPE = { note: "circle", link: "diamond", skill: "triangle", hackathon: "hexagon", project: "square", canvas: "rect" };
 
 export function typeIcon(type, color = "currentColor", size = 14) {
   return icon(TYPE_SHAPE[type] || "circle", { size, fill: color, color, stroke: 1 });

@@ -1,6 +1,7 @@
 mod ai;
 mod ask;
 mod assist;
+mod canvas;
 mod capture;
 mod commands;
 mod embed;
@@ -115,6 +116,11 @@ pub fn run() {
             assist::ai_suggest,
             assist::ai_apply,
             ask::ask,
+            commands::create_canvas,
+            commands::get_canvas,
+            commands::save_canvas,
+            commands::get_brain_state,
+            commands::set_brain_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

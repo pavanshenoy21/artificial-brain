@@ -7,6 +7,7 @@ export const GEOMETRIES = {
   skill:     s => new THREE.TetrahedronGeometry(s * 1.3),
   hackathon: s => new THREE.CylinderGeometry(s * 1.1, s * 1.1, s * 0.9, 6),
   project:   s => new THREE.BoxGeometry(s * 1.6, s * 1.6, s * 1.6),
+  canvas:    s => new THREE.BoxGeometry(s * 2.2, s * 1.4, s * 0.4),
 };
 
-export const BASE_SIZE = { note: 3, link: 2.6, skill: 2.8, hackathon: 3.4, project: 3.8 };
+export const BASE_SIZE = { note: 3, link: 2.6, skill: 2.8, hackathon: 3.4, project: 3.8, canvas: 3.4 };

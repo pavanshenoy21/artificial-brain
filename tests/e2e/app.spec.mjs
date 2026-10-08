@@ -4,9 +4,9 @@ import { test, expect, openApp, byTitle, idOf, aiOn } from "./fixtures.mjs";
 test.describe("shell", () => {
   test("loads the sample vault into graph, files and status bar", async ({ page, errors }) => {
     await openApp(page);
-    await expect(page.locator(".st-counts")).toHaveText("72 items · 69 links");
+    await expect(page.locator(".st-counts")).toHaveText("73 items · 73 links");
     await expect(page.locator(".pane-graph canvas")).toBeVisible();
-    await expect(page.locator("#left .group-head.folder")).toHaveCount(5); // hackathons links notes projects skills
+    await expect(page.locator("#left .group-head.folder")).toHaveCount(6); // canvases hackathons links notes projects skills
     await expect(page.locator(".st-ai")).toHaveText("AI off");
   });
 
@@ -14,7 +14,7 @@ test.describe("shell", () => {
     await openApp(page, "?empty");
     await expect(page.getByText("This vault is empty.")).toBeVisible();
     await page.getByRole("button", { name: "Import sample data" }).click();
-    await expect(page.locator(".st-counts")).toHaveText("72 items · 69 links");
+    await expect(page.locator(".st-counts")).toHaveText("73 items · 73 links");
     await expect(page.getByText("This vault is empty.")).toBeHidden();
   });
 
@@ -263,7 +263,7 @@ test.describe("organising", () => {
     await expect(page.locator('[data-act="delete"]')).toHaveText("Confirm");
     await page.locator('[data-act="delete"]').click();
     await expect.poll(() => byTitle(page, "Reading list")).toBeNull();
-    await expect(page.locator(".st-counts")).toContainText("71 items");
+    await expect(page.locator(".st-counts")).toContainText("72 items");
   });
 
   test("settings: add a lobe, save, it appears in the filters", async ({ page, errors }) => {
@@ -432,5 +432,148 @@ test.describe("graph framing", () => {
       return { inside, total: nodes.length };
     });
     expect(r.inside / r.total).toBeGreaterThan(0.95);
+  });
+});
+
+test.describe("canvas", () => {
+  const canvasId = page => page.evaluate(() => [...window.brain.app.items.values()].find(n => n.type === "canvas")?.id);
+  const stored = (page, id) => page.evaluate(id => window.brain.api.getCanvas(id), id);
+  const view = page => page.locator(".pane:not([hidden]) .cv-view");
+  async function openCanvas(page) {
+    await openApp(page);
+    const id = await canvasId(page);
+    await page.evaluate(id => window.brain.app.open(id), id);
+    await expect(page.locator(".pane:not([hidden]) .cv-node")).toHaveCount(9);
+    return id;
+  }
+
+  test("the sample canvas shows cards, groups, arrows and links to its notes", async ({ page, errors }) => {
+    const id = await openCanvas(page);
+    const pane = page.locator(".pane:not([hidden])");
+    await expect(pane.locator(".cv-title")).toHaveValue("CTF event plan");
+    await expect(pane.locator(".cv-group-label")).toHaveText(["Before the event", "On the day"]);
+    await expect(pane.locator(".cv-edge")).toHaveCount(5);
+    await expect(pane.locator(".cv-edge-label")).toHaveText(["every challenge", "then deploy"]);
+    // file cards show the note itself
+    await expect(pane.locator(".cv-file .cv-head").first()).toContainText("CTF challenge design checklist");
+    await expect(pane.locator(".cv-file .cv-content").first()).toContainText("intended path");
+    // the canvas links to the notes on it, so they list it as a backlink
+    const checklist = await idOf(page, "CTF challenge design checklist");
+    const back = await page.evaluate(id => window.brain.app.backlinks(id).map(e => e.id), checklist);
+    expect(back).toContain(id);
+    // and search finds text on the board
+    const hits = await page.evaluate(() => window.brain.api.search("scoreboard"));
+    expect(hits.map(h => h.id)).toContain(id);
+  });
+
+  test("double-click adds a card; typing, moving, undo and delete all save", async ({ page, errors }) => {
+    const id = await openCanvas(page);
+    const v = view(page);
+    const box = await v.boundingBox();
+    // empty spot near the bottom left
+    await page.mouse.dblclick(box.x + 120, box.y + box.height - 80);
+    const ta = page.locator(".cv-edit");
+    await expect(ta).toBeFocused();
+    await page.keyboard.type("Remember the **flag format**");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".cv-node.sel .cv-content")).toContainText("Remember the flag format");
+    await expect.poll(async () => (await stored(page, id)).nodes.length).toBe(10);
+    const added = (await stored(page, id)).nodes.find(n => n.text?.includes("flag format"));
+    expect(added).toMatchObject({ type: "text", width: 250, height: 60 });
+
+    // drag it 100px right
+    const card = page.locator(`.cv-node[data-id="${added.id}"]`);
+    const cb = await card.boundingBox();
+    await page.mouse.move(cb.x + 20, cb.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(cb.x + 70, cb.y + 20, { steps: 4 });
+    await page.mouse.move(cb.x + 120, cb.y + 20, { steps: 4 });
+    await page.mouse.up();
+    const z = await page.evaluate(() => window.brain.tabs.active.view.camera.z);
+    await expect.poll(async () => (await stored(page, id)).nodes.find(n => n.id === added.id).x).toBe(added.x + Math.round(100 / z));
+
+    // undo the move, then delete the card
+    await v.press("Control+z");
+    await expect.poll(async () => (await stored(page, id)).nodes.find(n => n.id === added.id).x).toBe(added.x);
+    await card.click();
+    await v.press("Delete");
+    await expect(card).toHaveCount(0);
+    await expect.poll(async () => (await stored(page, id)).nodes.length).toBe(9);
+    // redo is gone after a new change; undo brings the card back
+    await v.press("Control+z");
+    await expect(card).toHaveCount(1);
+  });
+
+  test("drag from a side dot to another card connects them; colours and arrows apply to the selection", async ({ page, errors }) => {
+    const id = await openCanvas(page);
+    const from = page.locator('.cv-node[data-id="t-goal"]');
+    const to = page.locator('.cv-node[data-id="l-ctfd"]');
+    await from.hover();
+    const port = from.locator('.cv-port[data-side="bottom"]');
+    const pb = await port.boundingBox();
+    const tb = await to.boundingBox();
+    await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(tb.x + tb.width / 2, tb.y + 5, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(async () => (await stored(page, id)).edges.length).toBe(6);
+    const e = (await stored(page, id)).edges.at(-1);
+    expect(e).toMatchObject({ fromNode: "t-goal", fromSide: "bottom", toNode: "l-ctfd", toSide: "top" });
+
+    // colour a card
+    await from.click({ position: { x: 10, y: 10 } });
+    await page.locator('.cv-swatches [data-color="5"]').click();
+    await expect.poll(async () => (await stored(page, id)).nodes.find(n => n.id === "t-goal").color).toBe("5");
+    await expect(from).toHaveClass(/colored/);
+    // unknown keys in the file survive edits
+    await page.evaluate(async id => {
+      const d = await window.brain.api.getCanvas(id);
+      d["x-other-plugin"] = { keep: 1 };
+      await window.brain.api.saveCanvas(id, d);
+      await window.brain.app.reload();
+    }, id);
+    await from.click({ position: { x: 10, y: 10 } });
+    await page.locator('.cv-swatches [data-color=""]').click();
+    await expect.poll(async () => (await stored(page, id)).nodes.find(n => n.id === "t-goal").color).toBeUndefined();
+    expect((await stored(page, id))["x-other-plugin"]).toEqual({ keep: 1 });
+  });
+
+  test("new canvas from the palette, add a note from search, rename", async ({ page, errors }) => {
+    await openApp(page);
+    await page.keyboard.press("Control+p");
+    await page.keyboard.type("new canvas");
+    await page.keyboard.press("Enter");
+    const title = page.locator(".pane:not([hidden]) .cv-title");
+    await expect(title).toBeFocused();
+    await title.fill("Exam map");
+    await title.press("Enter");
+    await expect(page.locator(".tab.on")).toContainText("Exam map");
+    const id = await page.evaluate(() => [...window.brain.app.items.values()].find(n => n.title === "Exam map")?.id);
+    expect(id).toBe("canvases/Exam map.canvas");
+    await page.locator('.pane:not([hidden]) [data-act="add-file"]').click();
+    await page.keyboard.type("Docker");
+    await page.waitForTimeout(150);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".pane:not([hidden]) .cv-file .cv-head")).toContainText("Docker");
+    await expect.poll(async () => (await stored(page, id)).nodes.map(n => n.file)).toEqual(["skills/Docker.md"]);
+    // renaming the note updates the card's path
+    await page.evaluate(async did => { await window.brain.api.updateItem(did, { title: "Docker and Podman" }); await window.brain.app.reload(); }, await idOf(page, "Docker"));
+    await expect.poll(async () => (await stored(page, id)).nodes.map(n => n.file)).toEqual(["skills/Docker and Podman.md"]);
+    await expect(page.locator(".pane:not([hidden]) .cv-file .cv-head")).toContainText("Docker and Podman");
+  });
+
+  test("dropping a file from the sidebar adds it as a card", async ({ page, errors }) => {
+    const id = await openCanvas(page);
+    const nid = await idOf(page, "GTFOBins");
+    const v = view(page);
+    const box = await v.boundingBox();
+    await page.evaluate(({ nid, x, y }) => {
+      const dt = new DataTransfer();
+      dt.setData("application/x-brain-item", nid);
+      const el = document.querySelector(".pane:not([hidden]) .cv-view");
+      el.dispatchEvent(new DragEvent("dragover", { dataTransfer: dt, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+    }, { nid, x: box.x + 200, y: box.y + box.height - 100 });
+    await expect.poll(async () => (await stored(page, id)).nodes.some(n => n.file === "links/GTFOBins.md")).toBe(true);
   });
 });

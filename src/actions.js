@@ -4,6 +4,7 @@ import { api, isDesktop } from "./api.js";
 import { app } from "./state.js";
 import { TYPE } from "./lib/types.js";
 import { toast } from "./shell/toast.js";
+import { importSampleCanvas } from "./data/sample-canvas.js";
 
 // "Untitled", "Untitled 2", … so new titles never collide (wikilinks resolve by title).
 export function uniqueTitle(base) {
@@ -23,9 +24,21 @@ export async function newItem(type = "note", fields = {}) {
   }
 }
 
+export async function newCanvas() {
+  try {
+    const item = await api.createCanvas(uniqueTitle("Untitled canvas"));
+    await app.reload();
+    app.open(item.id, { focusTitle: true });
+    return item;
+  } catch (e) {
+    toast(`Couldn't create canvas: ${e}`, "error");
+  }
+}
+
 export async function importSample() {
   try {
     const n = await api.importSample();
+    await importSampleCanvas(api).catch(e => console.warn("sample canvas", e));
     await app.reload();
     toast(`Imported ${n} items`);
   } catch (e) {

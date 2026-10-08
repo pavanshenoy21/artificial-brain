@@ -14,9 +14,11 @@ import { toast } from "../shell/toast.js";
 import { status } from "../shell/statusbar.js";
 import { tabsApi } from "../shell/tabs.js";
 import { editorMenu, itemMenu } from "../ai/actions.js";
+import { canvasTab } from "../canvas/view.js";
 
 md.resolveWikilink = target => app.resolve(target);
 
+// file name as Obsidian links to it: "Note" for Note.md, "Board.canvas" for a canvas
 const stemOf = n => (n.path || "").split("/").pop().replace(/\.md$/, "") || n.title;
 const words = s => (s.match(/[\p{L}\p{N}'’-]+/gu) || []).length;
 
@@ -43,6 +45,7 @@ export function linkOptions() {
 }
 
 export function itemTab(pane, tab) {
+  if (app.items.get(tab.id)?.type === "canvas") return canvasTab(pane, tab);
   let mode = tab.mode || prefs.get("editor.mode", "edit");
   pane.innerHTML = `
     <div class="doc">

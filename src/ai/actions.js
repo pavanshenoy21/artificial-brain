@@ -90,9 +90,16 @@ export async function selectionAction(kind, tab) {
 export function itemMenu(id, at) {
   const n = app.items.get(id);
   if (!n) return;
-  openMenu(at, [
+  const open = [
     { label: "Open", iconName: "file", run: () => app.open(id) },
     { label: "Show in graph", iconName: "graph", run: () => { app.emit("show-graph"); app.select(id, { source: "list" }); } },
+  ];
+  if (n.type === "canvas") {
+    openMenu(at, [...open, "-", { label: "Delete", iconName: "trash", run: () => deleteItem(id) }]);
+    return;
+  }
+  openMenu(at, [
+    ...open,
     "-",
     { label: "Polish", iconName: "edit", disabled: aiReason(), run: () => polishItem(id) },
     { label: "Summarize", iconName: "read", disabled: aiReason(), run: () => summarizeItem(id) },

@@ -5,7 +5,11 @@ export const TYPES = [
   { id: "skill",     name: "Skills",     one: "Skill",     dir: "skills" },
   { id: "hackathon", name: "Hackathons", one: "Hackathon", dir: "hackathons" },
   { id: "project",   name: "Projects",   one: "Project",   dir: "projects" },
+  // .canvas files (JSON, no frontmatter): not a type a note can be switched to
+  { id: "canvas",    name: "Canvases",   one: "Canvas",    dir: "canvases", file: true },
 ];
+// Types a markdown note can have (the Properties type picker).
+export const NOTE_TYPES = TYPES.filter(t => !t.file);
 export const TYPE = Object.fromEntries(TYPES.map(t => [t.id, t]));
 
 // Form schema per type: fields written to frontmatter (the body stays free markdown).
@@ -13,6 +17,7 @@ export const TYPE = Object.fromEntries(TYPES.map(t => [t.id, t]));
 // github: overwritten by GitHub sync (shown read-only); readonly: set by the app.
 export const FORMS = {
   note: [],
+  canvas: [],
   link: [
     { key: "url", kind: "url", label: "URL" },
     { key: "site", kind: "text" },

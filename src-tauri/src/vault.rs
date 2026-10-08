@@ -16,12 +16,14 @@ use std::time::UNIX_EPOCH;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::canvas;
 use crate::error::Result;
 use crate::markdown as md;
 
 pub const TYPES: [&str; 5] = ["note", "link", "skill", "hackathon", "project"];
-/// The app's own per-type folders.
-pub const TYPE_DIRS: [&str; 5] = ["notes", "links", "skills", "hackathons", "projects"];
+/// The app's own per-type folders (+ `canvases/` for new canvases and
+/// `daily/` for daily notes): they never become lobes.
+pub const TYPE_DIRS: [&str; 7] = ["notes", "links", "skills", "hackathons", "projects", "canvases", "daily"];
 
 /// An item as the frontend sees it: a flat object, type-specific fields inline.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -135,10 +137,16 @@ impl Vault {
 
     pub fn read(&self, file: &Path) -> Result<Item> {
         let text = fs::read_to_string(file)?;
+        if canvas::is_canvas(file) {
+            return Ok(canvas::parse_item(&text, &self.rel(file), &stem_of(file)));
+        }
         Ok(parse_item(&text, &self.rel(file), &stem_of(file)))
     }
 
     pub fn write(&self, file: &Path, item: &Item) -> Result<()> {
+        if canvas::is_canvas(file) {
+            return crate::error::err("a canvas is saved as JSON, not as a note");
+        }
         if let Some(dir) = file.parent() {
             fs::create_dir_all(dir)?;
         }
@@ -153,10 +161,14 @@ impl Vault {
     /// `<vault>/<type dir>/<stem>.md`, or `<stem> 2.md` … if taken. `current`
     /// is the item's own file, which doesn't count as taken.
     pub fn unique_path(&self, dir: &Path, stem: &str, current: Option<&Path>) -> PathBuf {
-        let mut candidate = dir.join(format!("{stem}.md"));
+        self.unique_path_ext(dir, stem, "md", current)
+    }
+
+    pub fn unique_path_ext(&self, dir: &Path, stem: &str, ext: &str, current: Option<&Path>) -> PathBuf {
+        let mut candidate = dir.join(format!("{stem}.{ext}"));
         let mut n = 2;
         while candidate.exists() && Some(candidate.as_path()) != current {
-            candidate = dir.join(format!("{stem} {n}.md"));
+            candidate = dir.join(format!("{stem} {n}.{ext}"));
             n += 1;
         }
         candidate
@@ -169,7 +181,8 @@ impl Vault {
     pub fn trash(&self, file: &Path) -> Result<PathBuf> {
         let dir = self.root.join(".trash");
         fs::create_dir_all(&dir)?;
-        let dest = self.unique_path(&dir, &stem_of(file), None);
+        let ext = file.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "md".into());
+        let dest = self.unique_path_ext(&dir, &stem_of(file), &ext, None);
         fs::rename(file, &dest)?;
         Ok(dest)
     }
@@ -242,6 +255,25 @@ impl Vault {
             write_atomic(&self.lobes_file(), &(serde_json::to_string_pretty(&lobes)? + "\n"))?;
         }
         Ok(lobes)
+    }
+
+    /// `.brain/<name>.json` (null if missing or unreadable). Names are plain
+    /// words, so nothing outside `.brain/` can be reached.
+    pub fn brain_state(&self, name: &str) -> Result<Value> {
+        let f = self.state_file(name)?;
+        Ok(fs::read_to_string(f).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null))
+    }
+
+    pub fn set_brain_state(&self, name: &str, value: &Value) -> Result<()> {
+        write_atomic(&self.state_file(name)?, &(serde_json::to_string_pretty(value)? + "\n"))
+    }
+
+    fn state_file(&self, name: &str) -> Result<PathBuf> {
+        let ok = !name.is_empty() && name.len() <= 40 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !ok || ["lobes", "folders-ignored"].contains(&name) {
+            return crate::error::err(format!("bad state name {name:?}"));
+        }
+        Ok(self.root.join(".brain").join(format!("{name}.json")))
     }
 
     /// Keeps an original before an AI action changes it (`.brain/history/`).
@@ -343,7 +375,7 @@ fn collect_md(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let ft = entry.file_type()?;
         if ft.is_dir() {
             collect_md(&path, out)?;
-        } else if ft.is_file() && is_md(&path) {
+        } else if ft.is_file() && (is_md(&path) || canvas::is_canvas(&path)) {
             out.push(path);
         }
     }
@@ -380,6 +412,7 @@ pub fn type_dir(kind: &str) -> &'static str {
         "skill" => "skills",
         "hackathon" => "hackathons",
         "project" => "projects",
+        "canvas" => canvas::DIR,
         _ => "notes",
     }
 }

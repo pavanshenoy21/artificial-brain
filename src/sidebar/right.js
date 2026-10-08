@@ -6,7 +6,7 @@ import { allTags } from "../lib/tags.js";
 import { api } from "../api.js";
 import { right } from "../shell/layout.js";
 import { icon, typeIcon } from "../icons.js";
-import { FORMS, TYPE, TYPES } from "../lib/types.js";
+import { FORMS, TYPE, NOTE_TYPES } from "../lib/types.js";
 import { fieldControl, readValue, bindLinkInputs } from "../forms/fields.js";
 import { UNSORTED } from "../lib/lobes.js";
 import { itemMenu, aiOn, AI_OFF } from "../ai/actions.js";
@@ -114,6 +114,8 @@ export function initRightSidebar() {
       ${content}</section>`;
 
   function propsHtml(n) {
+    if (n.type === "canvas")
+      return `<div class="props-form"><div class="prop-note">${n.error ? esc(n.error) : `${n.cards ?? 0} cards. A canvas is a JSON file (Obsidian's format), so it has no tags; its lobe comes from its folder.`}</div></div>`;
     const lobes = [...app.lobes, app.lobe.get(UNSORTED.id)];
     const form = FORMS[n.type] || [];
     const known = new Set(form.map(f => f.key));
@@ -123,7 +125,7 @@ export function initRightSidebar() {
     const inline = (n.inline_tags || []).filter(t => !(n.tags || []).includes(t));
     const synced = n.type === "project" && !!n.pushed_at;
     return `<div class="props-form">
-      <label class="prop"><span>type</span><select data-prop="type">${TYPES.map(t => `<option value="${t.id}" ${t.id === n.type ? "selected" : ""}>${t.one}</option>`).join("")}</select></label>
+      <label class="prop"><span>type</span><select data-prop="type">${NOTE_TYPES.map(t => `<option value="${t.id}" ${t.id === n.type ? "selected" : ""}>${t.one}</option>`).join("")}</select></label>
       <label class="prop" ${n.lobe_from === "folder" ? `title="From the folder; pick one to set it on this note"` : ""}><span>lobe${n.lobe_from === "folder" ? `<small class="faint"> (folder)</small>` : ""}</span><select data-prop="lobe">${lobes.map(l => `<option value="${esc(l.id)}" ${l.id === n.lobe ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
       <div class="prop"><span>tags</span><div class="tag-edit">
         ${(n.tags || []).map(t => `<span class="tag">#${esc(t)}<button type="button" data-untag="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("x", { size: 11 })}</button></span>`).join("")}
@@ -165,7 +167,7 @@ export function initRightSidebar() {
           <button type="button" class="btn ${confirmDelete ? "danger" : "quiet"}" data-act="delete" title="Move to .trash">${icon("trash", { size: 14 })}${confirmDelete ? "Confirm" : ""}</button>
         </div>
       </div>
-      ${suggestionsHtml(n)}
+      ${n.type === "canvas" ? "" : suggestionsHtml(n)}
       ${section("props", "Properties", "filters", null, propsHtml(n))}
       ${section("out", "Outgoing links", "outgoing", out.length, linkRows(out))}
       ${section("back", "Backlinks", "backlinks", back.length, linkRows(back, true))}

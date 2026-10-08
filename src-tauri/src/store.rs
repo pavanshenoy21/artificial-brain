@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use crate::canvas;
 use crate::error::{err, Error, Result};
 use crate::index::{self, Hit, Index, Link};
 use crate::markdown as md;
@@ -160,7 +161,13 @@ impl Store {
     // ------------------------------------------------------------ writes
 
     /// Creates an item from a flat object: `{ type, title, lobe?, tags?, body?, ...fields }`.
-    pub fn create(&mut self, input: Map<String, Value>) -> Result<Item> {
+    pub fn create(&mut self, mut input: Map<String, Value>) -> Result<Item> {
+        // optional `folder`: vault-relative folder to create the file in
+        // (daily notes, "new note here" in a user folder); default: type folder
+        let folder = match input.remove("folder") {
+            Some(Value::String(f)) if !f.trim().is_empty() => Some(safe_folder(&f)?),
+            _ => None,
+        };
         let now = vault::now();
         let mut item = Item {
             id: vault::new_id(),
@@ -179,7 +186,8 @@ impl Store {
         if item.title.trim().is_empty() {
             return err("title is required");
         }
-        let file = self.vault.unique_path(&self.vault.type_dir(&item.kind), &md::file_stem_for(&item.title), None);
+        let dir = folder.map(|f| self.vault.abs(&f)).unwrap_or_else(|| self.vault.type_dir(&item.kind));
+        let file = self.vault.unique_path(&dir, &md::file_stem_for(&item.title), None);
         item.path = self.vault.rel(&file);
         self.vault.write(&file, &item)?;
         self.reindex(&[file], &[])?;
@@ -192,6 +200,9 @@ impl Store {
     /// change moves it to the new type's folder.
     pub fn update(&mut self, id: &str, patch: Map<String, Value>) -> Result<Item> {
         let old_file = self.file_of(id)?;
+        if canvas::is_canvas(&old_file) {
+            return self.update_canvas_meta(id, &old_file, patch);
+        }
         let mut item = self.vault.read(&old_file)?;
         item.id = id.to_string();
         let (old_title, old_kind, old_stem) = (item.title.clone(), item.kind.clone(), stem_of(&old_file));
@@ -224,7 +235,15 @@ impl Store {
             std::fs::remove_file(&old_file)?;
             removed.push(self.vault.rel(&old_file));
             if renamed {
-                touched.extend(self.rewrite_backlinks(&old_stem, &stem_of(&file), &old_title)?);
+                let (old_rel, new_rel) = (self.vault.rel(&old_file), self.vault.rel(&file));
+                let new_stem = stem_of(&file);
+                let mut pairs = vec![(old_stem.clone(), new_stem.clone())];
+                if old_title != old_stem {
+                    pairs.push((old_title.clone(), new_stem.clone()));
+                }
+                // path-style links: [[folder/Old]] -> [[folder/New]]
+                pairs.push((old_rel.trim_end_matches(".md").to_string(), new_rel.trim_end_matches(".md").to_string()));
+                touched.extend(self.rewrite_backlinks(&old_rel, &new_rel, &pairs)?);
             }
         }
         self.reindex(&touched, &removed)?;
@@ -308,23 +327,110 @@ impl Store {
         }
     }
 
-    /// After a rename, point [[Old]] (by file name or old title) at the new
-    /// file name. Returns the files that changed.
-    fn rewrite_backlinks(&self, old_stem: &str, new_stem: &str, old_title: &str) -> Result<Vec<PathBuf>> {
+    /// After a rename, rewrite [[Old]] links (each `(old, new)` pair) in
+    /// notes, and file cards + text-card links in canvases. Returns the files
+    /// that changed.
+    fn rewrite_backlinks(&self, old_rel: &str, new_rel: &str, pairs: &[(String, String)]) -> Result<Vec<PathBuf>> {
         let mut changed = Vec::new();
         for file in self.vault.files()? {
             let text = std::fs::read_to_string(&file)?;
-            let mut out = md::rename_wikilinks(&text, old_stem, new_stem);
-            if old_title != old_stem {
-                out = md::rename_wikilinks(&out, old_title, new_stem);
-            }
-            if out != text {
+            let out = if canvas::is_canvas(&file) {
+                canvas::rewrite_for_rename(&text, old_rel, new_rel, pairs)
+            } else {
+                let mut out = text.clone();
+                for (old, new) in pairs {
+                    out = md::rename_wikilinks(&out, old, new);
+                }
+                (out != text).then_some(out)
+            };
+            if let Some(out) = out {
                 vault::write_atomic(&file, &out)?;
                 changed.push(file);
             }
         }
         Ok(changed)
     }
+
+    // ------------------------------------------------------------ canvases
+
+    /// A new, empty canvas in `canvases/`.
+    pub fn create_canvas(&mut self, title: &str) -> Result<Item> {
+        let title = title.trim();
+        if title.is_empty() {
+            return err("title is required");
+        }
+        let dir = self.vault.type_dir("canvas");
+        std::fs::create_dir_all(&dir)?;
+        let file = self.vault.unique_path_ext(&dir, &md::file_stem_for(title), canvas::EXT, None);
+        vault::write_atomic(&file, &canvas::render(&canvas::empty())?)?;
+        self.reindex(std::slice::from_ref(&file), &[])?;
+        let rel = self.vault.rel(&file);
+        self.index.items()?.into_iter().find(|i| i.path == rel).ok_or_else(|| Error("canvas vanished after create".into()))
+    }
+
+    /// The canvas JSON as stored (unknown keys included).
+    pub fn get_canvas(&self, id: &str) -> Result<Value> {
+        let file = self.file_of(id)?;
+        if !canvas::is_canvas(&file) {
+            return err("not a canvas");
+        }
+        let text = std::fs::read_to_string(&file)?;
+        serde_json::from_str(&text).map_err(|e| Error(format!("this canvas file isn't valid JSON ({e}); fix it in a text editor")))
+    }
+
+    pub fn save_canvas(&mut self, id: &str, data: Value) -> Result<Item> {
+        let file = self.file_of(id)?;
+        if !canvas::is_canvas(&file) {
+            return err("not a canvas");
+        }
+        canvas::validate(&data)?;
+        vault::write_atomic(&file, &canvas::render(&data)?)?;
+        self.reindex(std::slice::from_ref(&file), &[])?;
+        self.get(id)?.ok_or_else(|| Error("canvas vanished after save".into()))
+    }
+
+    /// A canvas has no frontmatter: only its title (= file name) can change.
+    fn update_canvas_meta(&mut self, id: &str, old_file: &Path, patch: Map<String, Value>) -> Result<Item> {
+        let mut title = None;
+        for (k, v) in patch {
+            match k.as_str() {
+                "title" => title = v.as_str().map(|s| s.trim().to_string()),
+                "id" | "path" | "type" | "degree" | "lobe_from" | "inline_tags" | "cards" => {}
+                _ => return err(format!("a canvas can't store {k:?}: only its name can change")),
+            }
+        }
+        let Some(title) = title.filter(|t| t != &stem_of(old_file)) else {
+            return self.get(id)?.ok_or_else(|| Error("no such canvas".into()));
+        };
+        if title.is_empty() {
+            return err("title can't be empty");
+        }
+        let dir = old_file.parent().unwrap_or(self.vault.root()).to_path_buf();
+        let file = self.vault.unique_path_ext(&dir, &md::file_stem_for(&title), canvas::EXT, Some(old_file));
+        if file == old_file {
+            return self.get(id)?.ok_or_else(|| Error("no such canvas".into()));
+        }
+        std::fs::rename(old_file, &file)?;
+        let (old_rel, new_rel) = (self.vault.rel(old_file), self.vault.rel(&file));
+        let old_name = old_file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let new_name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let pairs = vec![(old_name, new_name), (old_rel.clone(), new_rel.clone())];
+        let mut touched = vec![file.clone()];
+        touched.extend(self.rewrite_backlinks(&old_rel, &new_rel, &pairs)?);
+        touched.retain(|f| f.exists());
+        self.reindex(&touched, &[old_rel])?;
+        // a canvas's id is its path, so it changes with the name
+        self.index.items()?.into_iter().find(|i| i.path == new_rel).ok_or_else(|| Error("canvas vanished after rename".into()))
+    }
+}
+
+/// A vault-relative folder from the UI: no absolute paths, `..` or dot-folders.
+fn safe_folder(f: &str) -> Result<String> {
+    let parts: Vec<&str> = f.split(['/', '\\']).map(str::trim).filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() || parts.iter().any(|p| p.starts_with('.') || p.contains(':')) {
+        return err(format!("bad folder {f:?}"));
+    }
+    Ok(parts.join("/"))
 }
 
 fn apply_patch(item: &mut Item, patch: Map<String, Value>) -> Result<()> {
@@ -564,5 +670,101 @@ mod tests {
         lobes[0].name = "Security".into();
         s.save_lobes(&lobes).unwrap();
         assert_eq!(s.lobes().unwrap()[0].name, "Security");
+    }
+
+    #[test]
+    fn canvases_are_items_linked_to_their_cards() {
+        let (_t, mut s) = setup();
+        let docker = s.create(obj(json!({"type": "skill", "title": "Docker"}))).unwrap();
+        let c = s.create_canvas("Week plan").unwrap();
+        assert_eq!((c.kind.as_str(), c.path.as_str()), ("canvas", "canvases/Week plan.canvas"));
+        assert_eq!(s.get_canvas(&c.id).unwrap(), canvas::empty());
+
+        let data = json!({
+            "nodes": [
+                {"id": "t", "type": "text", "text": "Ship the zebra demo, see [[Docker]]", "x": 0, "y": 0, "width": 250, "height": 60},
+                {"id": "f", "type": "file", "file": docker.path, "x": 300, "y": 0, "width": 400, "height": 400}
+            ],
+            "edges": [{"id": "e", "fromNode": "t", "toNode": "f", "toEnd": "arrow"}],
+            "x-unknown": 1
+        });
+        let saved = s.save_canvas(&c.id, data.clone()).unwrap();
+        assert_eq!(saved.fields["cards"], 2);
+        assert_eq!(s.get_canvas(&c.id).unwrap(), data);
+        let text = std::fs::read_to_string(s.vault.abs(&c.path)).unwrap();
+        assert!(text.contains("\n\t\"nodes\""), "tab-indented like Obsidian");
+        assert!(s.graph().unwrap().links.iter().any(|l| l.source == c.id && l.target == docker.id));
+        assert_eq!(s.search("zebra", 5).unwrap()[0].id, c.id);
+
+        // a bad canvas is refused and the file is left alone
+        assert!(s.save_canvas(&c.id, json!({"nodes": [{"id": "x"}]})).is_err());
+        assert_eq!(s.get_canvas(&c.id).unwrap(), data);
+        // notes can't be written as canvases, canvases have no frontmatter
+        assert!(s.save_canvas(&docker.id, data.clone()).is_err());
+        assert!(s.update(&c.id, obj(json!({"tags": ["x"]}))).is_err());
+    }
+
+    #[test]
+    fn renames_keep_canvases_in_step() {
+        let (_t, mut s) = setup();
+        let docker = s.create(obj(json!({"type": "note", "title": "Docker"}))).unwrap();
+        let c = s.create_canvas("Board").unwrap();
+        let data = json!({"nodes": [
+            {"id": "t", "type": "text", "text": "see [[Docker]]", "x": 0, "y": 0, "width": 1, "height": 1},
+            {"id": "f", "type": "file", "file": "notes/Docker.md", "x": 0, "y": 0, "width": 1, "height": 1}
+        ], "edges": []});
+        s.save_canvas(&c.id, data).unwrap();
+        let other = s.create(obj(json!({"title": "Index", "body": "[[Board.canvas]] and [[notes/Docker]]"}))).unwrap();
+
+        // renaming the note updates the canvas's file card and text link,
+        // and the path-style link in another note
+        s.update(&docker.id, obj(json!({"title": "Containers"}))).unwrap();
+        let v = s.get_canvas(&c.id).unwrap();
+        assert_eq!(v["nodes"][1]["file"], "notes/Containers.md");
+        assert_eq!(v["nodes"][0]["text"], "see [[Containers]]");
+        assert_eq!(s.get(&other.id).unwrap().unwrap().body, "[[Board.canvas]] and [[notes/Containers]]");
+
+        // renaming the canvas moves the file and fixes links to it; its id is its path
+        let renamed = s.update(&c.id, obj(json!({"title": "Sprint board"}))).unwrap();
+        assert_eq!(renamed.path, "canvases/Sprint board.canvas");
+        assert_eq!(renamed.id, renamed.path);
+        assert!(s.get(&c.id).unwrap().is_none());
+        assert_eq!(s.get(&other.id).unwrap().unwrap().body, "[[Sprint board.canvas]] and [[notes/Containers]]");
+        assert!(s.graph().unwrap().links.iter().any(|l| l.source == other.id && l.target == renamed.id));
+
+        // delete goes to the trash with its extension
+        s.delete(&renamed.id).unwrap();
+        assert!(s.vault.abs(".trash/Sprint board.canvas").is_file());
+    }
+
+    #[test]
+    fn obsidian_canvas_files_are_read_untouched() {
+        let (_t, mut s) = setup();
+        let raw = "{\n\t\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"text\":\"hello\",\"x\":0,\"y\":0,\"width\":1,\"height\":1}],\n\t\"edges\":[]\n}";
+        std::fs::create_dir_all(s.vault.abs("Study")).unwrap();
+        std::fs::write(s.vault.abs("Study/Exam map.canvas"), raw).unwrap();
+        std::fs::write(s.vault.abs("Study/Broken.canvas"), "{ nope").unwrap();
+        s.sync().unwrap();
+        let g = s.graph().unwrap();
+        let c = g.nodes.iter().find(|n| n.path == "Study/Exam map.canvas").unwrap();
+        assert_eq!((c.kind.as_str(), c.title.as_str()), ("canvas", "Exam map"));
+        assert!(c.lobe.as_deref().unwrap().starts_with("folder-"));
+        assert!(g.nodes.iter().any(|n| n.path == "Study/Broken.canvas" && n.fields.contains_key("error")));
+        assert!(s.get_canvas("Study/Broken.canvas").is_err());
+        assert_eq!(std::fs::read_to_string(s.vault.abs("Study/Exam map.canvas")).unwrap(), raw);
+    }
+
+    #[test]
+    fn create_in_a_folder_and_brain_state() {
+        let (_t, mut s) = setup();
+        let d = s.create(obj(json!({"title": "2026-10-08", "folder": "daily"}))).unwrap();
+        assert_eq!(d.path, "daily/2026-10-08.md");
+        assert!(s.create(obj(json!({"title": "x", "folder": "../out"}))).is_err());
+        assert!(s.create(obj(json!({"title": "x", "folder": ".brain"}))).is_err());
+        assert_eq!(s.vault.brain_state("review").unwrap(), Value::Null);
+        s.vault.set_brain_state("review", &json!({"a": 1})).unwrap();
+        assert_eq!(s.vault.brain_state("review").unwrap(), json!({"a": 1}));
+        assert!(s.vault.brain_state("../x").is_err());
+        assert!(s.vault.set_brain_state("lobes", &json!([])).is_err());
     }
 }

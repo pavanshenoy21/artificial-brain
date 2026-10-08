@@ -33,11 +33,18 @@ export function createGraphView(container) {
     <div class="graph-hint"><span data-hint-drag>drag to rotate</span> · scroll to zoom · click to focus · double-click to open</div>`;
   const el = container.querySelector(".graph-canvas");
 
+  // Types hidden by the filter are remembered; a type added in a later version
+  // (canvas) starts visible instead of hidden.
+  function savedTypes() {
+    const saved = prefs.get("graph.types", null);
+    const known = prefs.get("graph.types.known", ["note", "link", "skill", "hackathon", "project"]);
+    return new Set(TYPES.map(t => t.id).filter(id => !saved || saved.includes(id) || !known.includes(id)));
+  }
   const state = {
     focus: null,           // { kind: "node", node } | { kind: "lobe", lobe }
     levels: new Map(),     // id -> 0 focus, 1 neighbour, 2 second ring, 3 background
     hover: null,
-    types: new Set(prefs.get("graph.types", TYPES.map(t => t.id))),
+    types: savedTypes(),
     showSimilar: prefs.get("graph.similar", true),
     orbit: prefs.get("graph.orbit", false),
     flat: prefs.get("graph.view", "3d") === "2d",
@@ -652,6 +659,7 @@ export function createGraphView(container) {
     setTypes(types) {
       state.types = new Set(types);
       prefs.set("graph.types", [...state.types]);
+      prefs.set("graph.types.known", TYPES.map(t => t.id));
       if (state.focus?.kind === "node" && !state.types.has(state.focus.node.type)) clearFocus();
       Graph.nodeVisibility(n => state.types.has(n.type));
       rebuildLinks();

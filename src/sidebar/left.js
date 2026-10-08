@@ -33,7 +33,7 @@ export function initLeftSidebar({ graph }) {
   let mode = prefs.get("files.mode", "folders");
 
   function row(n, depth = 0) {
-    return `<div class="row item-row ${n.id === app.selected ? "on" : ""}" data-id="${esc(n.id)}" role="treeitem" tabindex="-1" title="${esc(n.path || n.title)}" style="--depth:${depth}">
+    return `<div class="row item-row ${n.id === app.selected ? "on" : ""}" data-id="${esc(n.id)}" role="treeitem" tabindex="-1" draggable="true" title="${esc(n.path || n.title)}" style="--depth:${depth}">
       <span class="dot" style="background:${app.lobeOf(n).color}"></span><span class="row-title">${esc(n.title)}</span>${linkState(n)}</div>`;
   }
 
@@ -97,6 +97,16 @@ export function initLeftSidebar({ graph }) {
     renderFiles();
   });
 
+  // drag a file onto a canvas (or into the editor, as a [[link]])
+  document.getElementById("left").addEventListener("dragstart", e => {
+    const r = e.target.closest?.(".item-row");
+    const n = r && app.items.get(r.dataset.id);
+    if (!n) return;
+    const stem = (n.path || "").split("/").pop().replace(/\.md$/, "") || n.title;
+    e.dataTransfer.setData("application/x-brain-item", n.id);
+    e.dataTransfer.setData("text/plain", `[[${stem}]]`);
+    e.dataTransfer.effectAllowed = "copy";
+  });
   tree.addEventListener("click", e => {
     const f = e.target.closest("[data-folder]");
     if (f) {
