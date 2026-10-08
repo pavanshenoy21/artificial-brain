@@ -562,6 +562,24 @@ test.describe("canvas", () => {
     await expect(page.locator(".pane:not([hidden]) .cv-file .cv-head")).toContainText("Docker and Podman");
   });
 
+  test("a canvas opened in the background is fitted when it is first shown", async ({ page, errors }) => {
+    await openApp(page);
+    const id = await canvasId(page);
+    // a slow disk: the board's JSON arrives after the pane is laid out
+    await page.evaluate(() => {
+      const get = window.brain.api.getCanvas;
+      window.brain.api.getCanvas = id => new Promise(r => setTimeout(r, 400)).then(() => get(id));
+    });
+    await page.evaluate(id => window.brain.tabs.openItem(id, { background: true }), id);
+    await page.waitForTimeout(300);
+    await page.evaluate(id => window.brain.tabs.activate(`item:${id}`), id);
+    await expect.poll(() => page.evaluate(() => window.brain.tabs.active.view.camera?.z)).toBeLessThan(1);
+    // every card is inside the visible board
+    const v = await view(page).boundingBox();
+    for (const b of await page.locator(".pane:not([hidden]) .cv-node:not(.cv-group)").evaluateAll(els => els.map(e => e.getBoundingClientRect().toJSON())))
+      expect(b.left >= v.x - 1 && b.right <= v.x + v.width + 1 && b.top >= v.y - 1 && b.bottom <= v.y + v.height + 1).toBe(true);
+  });
+
   test("dropping a file from the sidebar adds it as a card", async ({ page, errors }) => {
     const id = await openCanvas(page);
     const nid = await idOf(page, "GTFOBins");

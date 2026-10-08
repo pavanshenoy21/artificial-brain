@@ -33,10 +33,10 @@ export function canvasTab(pane, tab) {
       <div class="cv-bar">
         <input class="cv-title" spellcheck="false" aria-label="Canvas name" />
         <div class="cv-tools">
-          <button type="button" class="btn-ghost" data-act="add-text" title="New card (double-click the board)">${icon("note", { size: 14 })}Card</button>
-          <button type="button" class="btn-ghost" data-act="add-file" title="Add a note from the vault">${icon("file", { size: 14 })}Note</button>
-          <button type="button" class="btn-ghost" data-act="add-link" title="Add a web link">${icon("link", { size: 14 })}Link</button>
-          <button type="button" class="btn-ghost" data-act="add-group" title="Group the selection (or add an empty group)">${icon("group", { size: 14 })}Group</button>
+          <button type="button" class="btn-ghost" data-act="add-text" title="New card (double-click the board)">${icon("note", { size: 14 })}<span class="lbl">Card</span></button>
+          <button type="button" class="btn-ghost" data-act="add-file" title="Add a note from the vault">${icon("file", { size: 14 })}<span class="lbl">Note</span></button>
+          <button type="button" class="btn-ghost" data-act="add-link" title="Add a web link">${icon("link", { size: 14 })}<span class="lbl">Link</span></button>
+          <button type="button" class="btn-ghost" data-act="add-group" title="Group the selection (or add an empty group)">${icon("group", { size: 14 })}<span class="lbl">Group</span></button>
           <span class="cv-sel" hidden>
             <span class="cv-sep"></span>
             <span class="cv-swatches">
@@ -103,9 +103,9 @@ export function canvasTab(pane, tab) {
       msgEl.textContent = String(e?.message || e);
     }
     render();
-    if (!cam) {
+    if (!placed) {
       const saved = prefs.get(viewKey(), null);
-      if (saved && Number.isFinite(saved.z)) setCam(saved);
+      if (saved && Number.isFinite(saved.z)) { setCam(saved); placed = true; }
       else fit(false);
     }
   }
@@ -170,19 +170,25 @@ export function canvasTab(pane, tab) {
   const rect = () => viewEl.getBoundingClientRect();
   function toWorld(cx, cy) {
     const r = rect();
+    if (!cam) cam = { x: r.width / 2, y: r.height / 2, z: 1 };
     return { x: (cx - r.left - cam.x) / cam.z, y: (cy - r.top - cam.y) / cam.z };
   }
   function zoomAt(f, cx, cy) {
+    if (!cam) return;
     const r = rect();
     const px = cx ?? r.left + r.width / 2, py = cy ?? r.top + r.height / 2;
     const z = Math.min(ZMAX, Math.max(ZMIN, cam.z * f));
     const wx = (px - r.left - cam.x) / cam.z, wy = (py - r.top - cam.y) / cam.z;
     setCam({ z, x: px - r.left - wx * z, y: py - r.top - wy * z });
   }
+  // `placed`: the camera has been set from the content (or a saved view); until
+  // then the pane may have no size yet (opened in the background) or no data
+  let placed = false;
   function fit(onlySel = true) {
     const r = rect();
     const nodes = onlySel && sel.size ? data.nodes.filter(n => sel.has(n.id)) : data.nodes;
-    if (!r.width) { cam = cam || { x: 0, y: 0, z: 1 }; return; }
+    if (!r.width || !r.height) return;
+    if (loaded) placed = true;
     setCam(nodes.length ? fitView(bounds(nodes), r.width, r.height) : { x: r.width / 2, y: r.height / 2, z: 1 });
   }
   const viewCenter = () => { const r = rect(); return toWorld(r.left + r.width / 2, r.top + r.height / 2); };
@@ -758,8 +764,9 @@ export function canvasTab(pane, tab) {
   let size = null;
   const ro = new ResizeObserver(() => {
     const r = rect();
-    if (!r.width) return;
-    if (!cam) { fit(false); return; }
+    pane.querySelector(".cv").classList.toggle("narrow", r.width < 980);
+    if (!r.width || !r.height) return;
+    if (!placed) { if (loaded) fit(false); size = { w: r.width, h: r.height }; return; }
     if (size) setCam({ ...cam, x: cam.x + (r.width - size.w) / 2, y: cam.y + (r.height - size.h) / 2 });
     size = { w: r.width, h: r.height };
   });
