@@ -220,8 +220,8 @@ pub async fn test_embed(state: State<'_, AppState>, settings: Settings) -> Cmd<T
 // ---------------------------------------------------------------- canvases
 
 #[tauri::command]
-pub async fn create_canvas(app: AppHandle, state: State<'_, AppState>, title: String) -> Cmd<Item> {
-    let item = run(&state, |s| s.create_canvas(&title))?;
+pub async fn create_canvas(app: AppHandle, state: State<'_, AppState>, title: String, folder: Option<String>) -> Cmd<Item> {
+    let item = run(&state, |s| s.create_canvas(&title, folder.as_deref()))?;
     changed(&app, "items");
     Ok(item)
 }
@@ -252,4 +252,37 @@ pub async fn get_brain_state(state: State<'_, AppState>, name: String) -> Cmd<Va
 #[tauri::command]
 pub async fn set_brain_state(state: State<'_, AppState>, name: String, value: Value) -> Cmd<()> {
     run(&state, |s| s.vault.set_brain_state(&name, &value))
+}
+
+// ---------------------------------------------------------------- folders (file explorer)
+
+#[tauri::command]
+pub async fn create_folder(app: AppHandle, state: State<'_, AppState>, path: String) -> Cmd<String> {
+    let p = run(&state, |s| s.create_folder(&path))?;
+    changed(&app, "folders");
+    Ok(p)
+}
+
+/// Returns [old id, new id] pairs for items whose id followed their path.
+#[tauri::command]
+pub async fn rename_folder(app: AppHandle, state: State<'_, AppState>, from: String, to: String) -> Cmd<Vec<(String, String)>> {
+    let ids = run(&state, |s| s.rename_folder(&from, &to))?;
+    changed(&app, "folders");
+    embed::backfill(&app);
+    Ok(ids)
+}
+
+#[tauri::command]
+pub async fn delete_folder(app: AppHandle, state: State<'_, AppState>, path: String) -> Cmd<()> {
+    run(&state, |s| s.delete_folder(&path))?;
+    changed(&app, "folders");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn move_item(app: AppHandle, state: State<'_, AppState>, id: String, folder: String) -> Cmd<Vec<(String, String)>> {
+    let ids = run(&state, |s| s.move_item(&id, &folder))?;
+    changed(&app, "items");
+    embed::backfill(&app);
+    Ok(ids)
 }

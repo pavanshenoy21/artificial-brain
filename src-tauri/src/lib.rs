@@ -121,6 +121,10 @@ pub fn run() {
             commands::save_canvas,
             commands::get_brain_state,
             commands::set_brain_state,
+            commands::create_folder,
+            commands::rename_folder,
+            commands::delete_folder,
+            commands::move_item,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

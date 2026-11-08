@@ -128,15 +128,19 @@ pub fn empty() -> Value {
 
 /// After a file was renamed: point file cards at its new path and rewrite
 /// [[links]] in text cards. Returns the new JSON text if anything changed.
-pub fn rewrite_for_rename(text: &str, old_rel: &str, new_rel: &str, pairs: &[(String, String)]) -> Option<String> {
+/// `moves`: (old path, new path) of files that moved; `pairs`: (old, new) link targets.
+pub fn rewrite_for_rename(text: &str, moves: &[(String, String)], pairs: &[(String, String)]) -> Option<String> {
     let mut v: Value = serde_json::from_str(text).ok()?;
     let mut changed = false;
     if let Some(nodes) = v.get_mut("nodes").and_then(Value::as_array_mut) {
         for n in nodes {
             let ty = n.get("type").and_then(Value::as_str).unwrap_or("").to_string();
-            if ty == "file" && n.get("file").and_then(Value::as_str) == Some(old_rel) {
-                n["file"] = new_rel.into();
-                changed = true;
+            if ty == "file" {
+                let cur = n.get("file").and_then(Value::as_str).unwrap_or("");
+                if let Some((_, new)) = moves.iter().find(|(old, _)| old == cur) {
+                    n["file"] = new.as_str().into();
+                    changed = true;
+                }
             }
             if ty == "text" {
                 if let Some(t) = n.get("text").and_then(Value::as_str) {
@@ -220,10 +224,10 @@ mod tests {
 
     #[test]
     fn rename_rewrites_file_cards_and_text_links() {
-        let out = rewrite_for_rename(SAMPLE, "notes/Docker.md", "notes/Containers.md", &[("Docker".into(), "Containers".into())]).unwrap();
+        let out = rewrite_for_rename(SAMPLE, &[("notes/Docker.md".into(), "notes/Containers.md".into())], &[("Docker".into(), "Containers".into())]).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["nodes"][1]["file"], "notes/Containers.md");
         assert!(v["nodes"][0]["text"].as_str().unwrap().contains("[[Containers]]"));
-        assert!(rewrite_for_rename(SAMPLE, "notes/Other.md", "notes/X.md", &[("Other".into(), "X".into())]).is_none());
+        assert!(rewrite_for_rename(SAMPLE, &[("notes/Other.md".into(), "notes/X.md".into())], &[("Other".into(), "X".into())]).is_none());
     }
 }

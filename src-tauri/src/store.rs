@@ -16,6 +16,8 @@ use crate::vault::{self, file_stamp, stem_of, Item, Lobe, Vault, TYPES};
 #[derive(Debug, Serialize)]
 pub struct Graph {
     pub nodes: Vec<Item>,
+    /// Every folder, empty ones too (the file explorer shows them).
+    pub folders: Vec<String>,
     pub links: Vec<Link>,
     pub lobes: Vec<Lobe>,
     /// Embedding-based suggestions; None = UI falls back to shared tags.
@@ -126,7 +128,7 @@ impl Store {
                 }
             }
         }
-        Ok(Graph { nodes, links: self.index.links()?, lobes, similar: None })
+        Ok(Graph { nodes, folders: self.folders()?, links: self.index.links()?, lobes, similar: None })
     }
 
     pub fn get(&self, id: &str) -> Result<Option<Item>> {
@@ -243,7 +245,7 @@ impl Store {
                 }
                 // path-style links: [[folder/Old]] -> [[folder/New]]
                 pairs.push((old_rel.trim_end_matches(".md").to_string(), new_rel.trim_end_matches(".md").to_string()));
-                touched.extend(self.rewrite_backlinks(&old_rel, &new_rel, &pairs)?);
+                touched.extend(self.rewrite_backlinks(&[(old_rel, new_rel)], &pairs)?);
             }
         }
         self.reindex(&touched, &removed)?;
@@ -330,12 +332,12 @@ impl Store {
     /// After a rename, rewrite [[Old]] links (each `(old, new)` pair) in
     /// notes, and file cards + text-card links in canvases. Returns the files
     /// that changed.
-    fn rewrite_backlinks(&self, old_rel: &str, new_rel: &str, pairs: &[(String, String)]) -> Result<Vec<PathBuf>> {
+    fn rewrite_backlinks(&self, moves: &[(String, String)], pairs: &[(String, String)]) -> Result<Vec<PathBuf>> {
         let mut changed = Vec::new();
         for file in self.vault.files()? {
             let text = std::fs::read_to_string(&file)?;
             let out = if canvas::is_canvas(&file) {
-                canvas::rewrite_for_rename(&text, old_rel, new_rel, pairs)
+                canvas::rewrite_for_rename(&text, moves, pairs)
             } else {
                 let mut out = text.clone();
                 for (old, new) in pairs {
@@ -351,15 +353,185 @@ impl Store {
         Ok(changed)
     }
 
+    // ------------------------------------------------------------ folders
+
+    /// Every folder in the vault (dot-folders skipped), empty ones included.
+    pub fn folders(&self) -> Result<Vec<String>> {
+        fn walk(dir: &Path, rel: &str, out: &mut Vec<String>) -> Result<()> {
+            for e in std::fs::read_dir(dir)? {
+                let e = e?;
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') || !e.file_type()?.is_dir() {
+                    continue;
+                }
+                let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+                walk(&e.path(), &r, out)?;
+                out.push(r);
+            }
+            Ok(())
+        }
+        let mut out = Vec::new();
+        walk(self.vault.root(), "", &mut out)?;
+        out.sort();
+        Ok(out)
+    }
+
+    pub fn create_folder(&mut self, path: &str) -> Result<String> {
+        let rel = safe_folder(path)?;
+        let dir = self.vault.abs(&rel);
+        if dir.exists() {
+            return err(format!("\"{rel}\" already exists"));
+        }
+        std::fs::create_dir_all(&dir)?;
+        Ok(rel)
+    }
+
+    /// Renames or moves a folder (`to` is its new vault-relative path).
+    /// Path-style [[links]] and canvas cards that pointed inside it are
+    /// updated. Returns (old id, new id) for items whose id changed (files
+    /// without an `id:` are known by their path).
+    pub fn rename_folder(&mut self, from: &str, to: &str) -> Result<Vec<(String, String)>> {
+        let (from, to) = (safe_folder(from)?, safe_folder(to)?);
+        let (src, dst) = (self.vault.abs(&from), self.vault.abs(&to));
+        if !src.is_dir() {
+            return err(format!("no folder \"{from}\""));
+        }
+        if from == to {
+            return Ok(vec![]);
+        }
+        if to.starts_with(&format!("{from}/")) {
+            return err("a folder can't be moved into itself");
+        }
+        // case-only renames ("Notes" -> "notes") are fine on case-insensitive disks
+        if dst.exists() && from.to_lowercase() != to.to_lowercase() {
+            return err(format!("\"{to}\" already exists"));
+        }
+        let before = self.snapshot_under(&format!("{from}/"))?;
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::rename(&src, &dst)?;
+        let moves: Vec<_> = before.iter().map(|(p, ..)| (p.clone(), format!("{to}{}", &p[from.len()..]))).collect();
+        self.retarget_folder_lobe(&from, &to)?;
+        self.finish_moves(&moves, &before)
+    }
+
+    /// Moves a folder and everything in it to `.trash/` (never hard-deleted).
+    pub fn delete_folder(&mut self, path: &str) -> Result<()> {
+        let rel = safe_folder(path)?;
+        let dir = self.vault.abs(&rel);
+        if !dir.is_dir() {
+            return err(format!("no folder \"{rel}\""));
+        }
+        let gone: Vec<String> = self.snapshot_under(&format!("{rel}/"))?.into_iter().map(|(p, ..)| p).collect();
+        let trash = self.vault.root().join(".trash");
+        std::fs::create_dir_all(&trash)?;
+        let name = stem_of(&dir);
+        let mut dest = trash.join(&name);
+        let mut n = 2;
+        while dest.exists() {
+            dest = trash.join(format!("{name} {n}"));
+            n += 1;
+        }
+        std::fs::rename(&dir, &dest)?;
+        self.reindex(&[], &gone)?;
+        self.index.prune_embeddings()?;
+        Ok(())
+    }
+
+    /// Moves one item into `folder` ("" = the vault root), keeping its name.
+    pub fn move_item(&mut self, id: &str, folder: &str) -> Result<Vec<(String, String)>> {
+        let file = self.file_of(id)?;
+        let dir = if folder.trim().is_empty() { self.vault.root().to_path_buf() } else { self.vault.abs(&safe_folder(folder)?) };
+        if file.parent() == Some(dir.as_path()) {
+            return Ok(vec![]);
+        }
+        let ext = file.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "md".into());
+        std::fs::create_dir_all(&dir)?;
+        let dest = self.vault.unique_path_ext(&dir, &stem_of(&file), &ext, None);
+        let old_rel = self.vault.rel(&file);
+        let before = self.snapshot_under("")?.into_iter().filter(|(p, ..)| *p == old_rel).collect::<Vec<_>>();
+        std::fs::rename(&file, &dest)?;
+        self.finish_moves(&[(old_rel, self.vault.rel(&dest))], &before)
+    }
+
+    /// (path, id, type) of indexed items whose path starts with `prefix`.
+    fn snapshot_under(&self, prefix: &str) -> Result<Vec<(String, String, String)>> {
+        Ok(self.index.items()?.into_iter().filter(|i| i.path.starts_with(prefix)).map(|i| (i.path, i.id, i.kind)).collect())
+    }
+
+    /// After files moved on disk: keep each item's type (a skill moved out of
+    /// skills/ stays a skill), fix path-style links and canvas cards, reindex.
+    fn finish_moves(&mut self, moves: &[(String, String)], before: &[(String, String, String)]) -> Result<Vec<(String, String)>> {
+        for (old, new) in moves {
+            let Some((_, old_id, kind)) = before.iter().find(|(p, ..)| p == old) else { continue };
+            let abs = self.vault.abs(new);
+            if canvas::is_canvas(&abs) {
+                continue;
+            }
+            let mut item = self.vault.read(&abs)?;
+            if &item.kind != kind {
+                item.kind = kind.clone();
+                if old_id != old {
+                    item.id = old_id.clone(); // keep a real id; path ids just follow the file
+                }
+                self.vault.write(&abs, &item)?;
+            }
+        }
+        let mut pairs = Vec::new();
+        for (o, n) in moves {
+            if let (Some(a), Some(b)) = (o.strip_suffix(".md"), n.strip_suffix(".md")) {
+                pairs.push((a.to_string(), b.to_string()));
+            }
+            pairs.push((o.clone(), n.clone()));
+        }
+        let mut touched: Vec<PathBuf> = moves.iter().map(|(_, n)| self.vault.abs(n)).collect();
+        touched.extend(self.rewrite_backlinks(moves, &pairs)?);
+        touched.sort();
+        touched.dedup();
+        touched.retain(|f| f.is_file());
+        let removed: Vec<String> = moves.iter().map(|(o, _)| o.clone()).collect();
+        self.reindex(&touched, &removed)?;
+        let items = self.index.items()?;
+        let mut ids = Vec::new();
+        for (old, new) in moves {
+            let old_id = before.iter().find(|(p, ..)| p == old).map(|(_, id, _)| id.clone());
+            let new_id = items.iter().find(|i| &i.path == new).map(|i| i.id.clone());
+            if let (Some(a), Some(b)) = (old_id, new_id) {
+                if a != b {
+                    ids.push((a, b));
+                }
+            }
+        }
+        Ok(ids)
+    }
+
+    /// A renamed top-level folder keeps its lobe (and colour).
+    fn retarget_folder_lobe(&self, from: &str, to: &str) -> Result<()> {
+        if from.contains('/') || to.contains('/') {
+            return Ok(());
+        }
+        let mut lobes = self.vault.lobes()?;
+        let Some(l) = lobes.iter_mut().find(|l| l.folder.as_deref() == Some(from)) else { return Ok(()) };
+        l.folder = Some(to.to_string());
+        if l.name == from {
+            l.name = to.to_string();
+        }
+        self.vault.save_lobes(&lobes)
+    }
+
     // ------------------------------------------------------------ canvases
 
     /// A new, empty canvas in `canvases/`.
-    pub fn create_canvas(&mut self, title: &str) -> Result<Item> {
+    pub fn create_canvas(&mut self, title: &str, folder: Option<&str>) -> Result<Item> {
         let title = title.trim();
         if title.is_empty() {
             return err("title is required");
         }
-        let dir = self.vault.type_dir("canvas");
+        let dir = match folder.filter(|f| !f.trim().is_empty()) {
+            Some(f) => self.vault.abs(&safe_folder(f)?),
+            None => self.vault.type_dir("canvas"),
+        };
         std::fs::create_dir_all(&dir)?;
         let file = self.vault.unique_path_ext(&dir, &md::file_stem_for(title), canvas::EXT, None);
         vault::write_atomic(&file, &canvas::render(&canvas::empty())?)?;
@@ -416,7 +588,7 @@ impl Store {
         let new_name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let pairs = vec![(old_name, new_name), (old_rel.clone(), new_rel.clone())];
         let mut touched = vec![file.clone()];
-        touched.extend(self.rewrite_backlinks(&old_rel, &new_rel, &pairs)?);
+        touched.extend(self.rewrite_backlinks(&[(old_rel.clone(), new_rel.clone())], &pairs)?);
         touched.retain(|f| f.exists());
         self.reindex(&touched, &[old_rel])?;
         // a canvas's id is its path, so it changes with the name
@@ -676,7 +848,7 @@ mod tests {
     fn canvases_are_items_linked_to_their_cards() {
         let (_t, mut s) = setup();
         let docker = s.create(obj(json!({"type": "skill", "title": "Docker"}))).unwrap();
-        let c = s.create_canvas("Week plan").unwrap();
+        let c = s.create_canvas("Week plan", None).unwrap();
         assert_eq!((c.kind.as_str(), c.path.as_str()), ("canvas", "canvases/Week plan.canvas"));
         assert_eq!(s.get_canvas(&c.id).unwrap(), canvas::empty());
 
@@ -708,7 +880,7 @@ mod tests {
     fn renames_keep_canvases_in_step() {
         let (_t, mut s) = setup();
         let docker = s.create(obj(json!({"type": "note", "title": "Docker"}))).unwrap();
-        let c = s.create_canvas("Board").unwrap();
+        let c = s.create_canvas("Board", None).unwrap();
         let data = json!({"nodes": [
             {"id": "t", "type": "text", "text": "see [[Docker]]", "x": 0, "y": 0, "width": 1, "height": 1},
             {"id": "f", "type": "file", "file": "notes/Docker.md", "x": 0, "y": 0, "width": 1, "height": 1}
