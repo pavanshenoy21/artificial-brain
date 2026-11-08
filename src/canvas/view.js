@@ -10,7 +10,7 @@
 import { app } from "../state.js";
 import { api } from "../api.js";
 import { md } from "../editor/markdown.js";
-import { icon, typeIcon } from "../icons.js";
+import { icon, itemIcon } from "../icons.js";
 import { esc, openExternal } from "../util.js";
 import { prefs } from "../lib/prefs.js";
 import { toast } from "../shell/toast.js";
@@ -19,6 +19,7 @@ import { tabsApi } from "../shell/tabs.js";
 import { openSearch } from "../palette/search.js";
 import { followLink } from "../editor/item-tab.js";
 import { toggleTask } from "../lib/tasks.js";
+import { renameItem } from "../actions.js";
 import {
   PRESETS, PRESET_NAMES, colorOf, newId, normalize, edgePath, curve, anchor, arrowHead, nearestSide,
   bounds, inside, intersects, drawOrder, fitView, isImage, SIDES,
@@ -222,9 +223,8 @@ export function canvasTab(pane, tab) {
           ${src ? `<img class="cv-img" src="${esc(src)}" alt="${esc(name)}" draggable="false" />` : `<div class="cv-content faint">${esc(n.file)}</div>`}`;
       }
       if (!it) return `<div class="cv-head">${icon("file", { size: 13 })}<span>${esc(name || "file")}</span></div><div class="cv-content faint">Not in the vault: ${esc(n.file || "")}</div>`;
-      const lobe = app.lobeOf(it);
-      const head = `<div class="cv-head" title="${esc(it.path)}">${typeIcon(it.type, lobe.color, 12)}<span>${esc(it.title)}</span></div>`;
-      if (it.type === "canvas") return `${head}<div class="cv-content faint">Canvas · ${it.cards ?? 0} cards. Double-click to open.</div>`;
+      const head = `<div class="cv-head" title="${esc(it.path)}">${itemIcon(it, app.colorOf(it))}<span>${esc(it.title)}</span></div>`;
+      if (it.type === "canvas") return `${head}<div class="cv-content faint">Canvas · ${it.props?.cards ?? 0} cards. Double-click to open.</div>`;
       return `${head}<div class="cv-content markdown">${it.body?.trim() ? md.render(it.body) : `<p class="faint">Empty note</p>`}</div>`;
     }
     return `<div class="cv-content faint">${esc(n.type)} card</div>`;
@@ -232,7 +232,7 @@ export function canvasTab(pane, tab) {
 
   const sig = n => {
     const it = n.type === "file" ? fileItem(n.file) : null;
-    return JSON.stringify([n.type, n.text, n.file, n.url, n.label, editing === n.id, it && [it.title, it.body, it.type, it.lobe, it.cards]]);
+    return JSON.stringify([n.type, n.text, n.file, n.url, n.label, editing === n.id, it && [it.title, it.body, it.type, app.colorOf(it), it.props?.cards]]);
   };
 
   function place(n) {
@@ -744,15 +744,10 @@ export function canvasTab(pane, tab) {
     const title = titleInput.value.replace(/\s+/g, " ").trim();
     if (!it || !title || title === it.title) { titleInput.value = it?.title ?? ""; return; }
     await tabsApi.saveAll();
-    try {
-      const next = await api.updateItem(tab.id, { title });
-      prefs.set(`canvas.view:${next.path}`, cam);
-      await app.reload();
-      app.open(next.id);
-    } catch (e) {
-      toast(`Rename failed: ${e}`, "error");
-      titleInput.value = it.title;
-    }
+    // the tab follows the file (app.moved), keeping the board as it is
+    const id = await renameItem(tab.id, title);
+    if (id !== it.id) prefs.set(`canvas.view:${id}`, cam);
+    else titleInput.value = item()?.title ?? it.title;
   }
   on(titleInput, "keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); titleInput.blur(); }

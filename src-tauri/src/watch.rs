@@ -22,19 +22,16 @@ pub fn start(app: &AppHandle, root: &Path) -> Option<Watcher> {
             let s = rel.to_string_lossy();
             let tmp = s.ends_with(".tmp");
             let hidden = rel.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'));
-            (!hidden && !tmp) || s.ends_with("lobes.json")
+            (!hidden && !tmp) || s.ends_with("colors.json")
         });
         if !relevant {
             return;
         }
         let state = handle.state::<AppState>();
         let changed = state.with_store(|s| s.sync()).map(|r| r.changed()).unwrap_or(false);
-        let lobes = events.iter().any(|e| e.path.ends_with("lobes.json"));
-        if changed || lobes {
+        let colors = events.iter().any(|e| e.path.ends_with("colors.json"));
+        if changed || colors {
             let _ = handle.emit("vault-changed", serde_json::json!({ "kind": "external" }));
-        }
-        if changed {
-            crate::embed::backfill(&handle);
         }
     });
     match debouncer {

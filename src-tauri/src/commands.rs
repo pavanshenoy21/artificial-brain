@@ -1,17 +1,17 @@
 //! Tauri commands. Everything returns `Result<T, String>`; writes emit
-//! `vault-changed` so every window (main, capture) reloads.
+//! `vault-changed` so the UI reloads.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::error::Result;
-use crate::index::{Hit, Link};
+use crate::index::Hit;
 use crate::settings::Settings;
 use crate::state::AppState;
-use crate::store::{Graph, Store, SyncReport};
-use crate::vault::{Item, Lobe};
-use crate::{capture, embed, watch};
+use crate::store::{Colors, Graph, Moved, SampleFile, Store, SyncReport};
+use crate::vault::Item;
+use crate::watch;
 
 type Cmd<T> = std::result::Result<T, String>;
 
@@ -24,13 +24,11 @@ fn changed(app: &AppHandle, kind: &str) {
 }
 
 #[tauri::command]
-pub async fn get_graph(app: AppHandle, state: State<'_, AppState>) -> Cmd<Graph> {
-    let mut g = run(&state, |s| {
+pub async fn get_graph(state: State<'_, AppState>) -> Cmd<Graph> {
+    run(&state, |s| {
         s.sync()?;
         s.graph()
-    })?;
-    g.similar = embed::graph_similar(&app, &g.links);
-    Ok(g)
+    })
 }
 
 #[tauri::command]
@@ -38,26 +36,24 @@ pub async fn get_item(state: State<'_, AppState>, id: String) -> Cmd<Option<Item
     run(&state, |s| s.get(&id))
 }
 
-/// `input`: `{ type, title, lobe?, tags?, body?, ...type-specific fields }`
+/// `input`: `{ title?, body?, folder?, tags?, ...properties }`
 #[tauri::command]
 pub async fn create_item(app: AppHandle, state: State<'_, AppState>, input: Map<String, Value>) -> Cmd<Item> {
     let item = run(&state, |s| s.create(input))?;
     changed(&app, "items");
-    embed::schedule(&app, vec![item.id.clone()]);
     Ok(item)
 }
 
-/// `patch`: any subset of the create fields; `null` removes a field.
+/// `patch`: `{ title?, body?, tags?, property: value | null }`. Returns the
+/// item; its id is its new path if the title changed.
 #[tauri::command]
 pub async fn update_item(app: AppHandle, state: State<'_, AppState>, id: String, patch: Map<String, Value>) -> Cmd<Item> {
     let item = run(&state, |s| s.update(&id, patch))?;
     changed(&app, "items");
-    // a rename rewrites other files too; backfill catches everything stale
-    embed::backfill(&app);
     Ok(item)
 }
 
-/// Moves the item's file to `<vault>/.trash`.
+/// Moves the file to `<vault>/.trash`.
 #[tauri::command]
 pub async fn delete_item(app: AppHandle, state: State<'_, AppState>, id: String) -> Cmd<()> {
     run(&state, |s| s.delete(&id))?;
@@ -76,10 +72,9 @@ pub async fn search(state: State<'_, AppState>, query: String, limit: Option<usi
 }
 
 #[tauri::command]
-pub async fn import_sample(app: AppHandle, state: State<'_, AppState>, nodes: Vec<Map<String, Value>>, links: Vec<Link>) -> Cmd<usize> {
-    let n = run(&state, |s| s.import(nodes, links))?;
+pub async fn import_sample(app: AppHandle, state: State<'_, AppState>, files: Vec<SampleFile>) -> Cmd<usize> {
+    let n = run(&state, |s| s.import(files))?;
     changed(&app, "items");
-    embed::backfill(&app);
     Ok(n)
 }
 
@@ -87,26 +82,13 @@ pub async fn import_sample(app: AppHandle, state: State<'_, AppState>, nodes: Ve
 pub async fn rebuild_index(app: AppHandle, state: State<'_, AppState>) -> Cmd<SyncReport> {
     let r = run(&state, |s| s.rebuild())?;
     changed(&app, "items");
-    embed::backfill(&app);
     Ok(r)
-}
-
-#[tauri::command]
-pub async fn list_lobes(state: State<'_, AppState>) -> Cmd<Vec<Lobe>> {
-    run(&state, |s| s.lobes())
-}
-
-#[tauri::command]
-pub async fn save_lobes(app: AppHandle, state: State<'_, AppState>, lobes: Vec<Lobe>) -> Cmd<()> {
-    run(&state, |s| s.save_lobes(&lobes))?;
-    changed(&app, "lobes");
-    Ok(())
 }
 
 #[derive(Serialize)]
 pub struct VaultInfo {
     path: String,
-    items: i64,
+    items: usize,
     error: Option<String>,
 }
 
@@ -114,7 +96,7 @@ pub struct VaultInfo {
 pub async fn vault_info(state: State<'_, AppState>) -> Cmd<VaultInfo> {
     let error = state.open_error.lock().ok().and_then(|e| e.clone());
     let path = state.settings().vault_dir(&state.home).to_string_lossy().into_owned();
-    let items = state.with_store(|s| s.index.count()).unwrap_or(0);
+    let items = state.with_store(|s| Ok(s.index.items()?.len())).unwrap_or(0);
     Ok(VaultInfo { path, items, error })
 }
 
@@ -132,28 +114,19 @@ pub async fn open_vault(app: AppHandle, state: State<'_, AppState>, path: String
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Cmd<Settings> {
-    Ok(state.settings().redacted())
+    Ok(state.settings())
 }
 
 #[tauri::command]
 pub async fn save_settings(app: AppHandle, state: State<'_, AppState>, settings: Settings) -> Cmd<Settings> {
     let old = state.settings();
-    let new = old.merged(settings);
-    new.save(&state.settings_file).map_err(|e| e.to_string())?;
-    *state.settings.lock().map_err(|_| "settings lock poisoned")? = new.clone();
-    if old.vault_dir(&state.home) != new.vault_dir(&state.home) {
+    settings.save(&state.settings_file).map_err(|e| e.to_string())?;
+    *state.settings.lock().map_err(|_| "settings lock poisoned")? = settings.clone();
+    if old.vault_dir(&state.home) != settings.vault_dir(&state.home) {
         open_store(&app, &state);
         changed(&app, "vault");
     }
-    if old.embed != new.embed {
-        embed::backfill(&app);
-        changed(&app, "similar");
-    }
-    if old.shortcuts.capture != new.shortcuts.capture {
-        capture::register_shortcut(&app, &old.shortcuts.capture, &new.shortcuts.capture);
-    }
-    let _ = app.emit("settings-changed", new.redacted());
-    Ok(new.redacted())
+    Ok(settings)
 }
 
 /// (Re)opens the store for the vault in settings and restarts the watcher.
@@ -184,39 +157,6 @@ pub fn open_store(app: &AppHandle, state: &AppState) {
     }
 }
 
-#[derive(Serialize)]
-pub struct TestResult {
-    ok: bool,
-    message: String,
-}
-
-impl TestResult {
-    pub fn new(ok: bool, message: String) -> Self {
-        TestResult { ok, message }
-    }
-}
-
-/// Tries the (possibly unsaved) AI settings with a tiny request.
-#[tauri::command]
-pub async fn test_ai(state: State<'_, AppState>, settings: Settings) -> Cmd<TestResult> {
-    let s = state.settings().merged(settings);
-    let r = crate::ai::chat(&s.ai, &[("user", "Reply with the single word: ok")], crate::ai::ChatOpts { max_tokens: 5, temperature: 0.0 }).await;
-    Ok(match r {
-        Ok(answer) => TestResult { ok: true, message: format!("Connected. The model replied: {}", answer.chars().take(40).collect::<String>()) },
-        Err(e) => TestResult { ok: false, message: e.to_string() },
-    })
-}
-
-#[tauri::command]
-pub async fn test_embed(state: State<'_, AppState>, settings: Settings) -> Cmd<TestResult> {
-    let s = state.settings().merged(settings);
-    let r = crate::ai::embed(&s.embed, &["test".to_string()]).await;
-    Ok(match r {
-        Ok(v) => TestResult { ok: true, message: format!("Connected. Vectors have {} dimensions.", v.first().map(Vec::len).unwrap_or(0)) },
-        Err(e) => TestResult { ok: false, message: e.to_string() },
-    })
-}
-
 // ---------------------------------------------------------------- canvases
 
 #[tauri::command]
@@ -236,22 +176,7 @@ pub async fn get_canvas(state: State<'_, AppState>, id: String) -> Cmd<Value> {
 pub async fn save_canvas(app: AppHandle, state: State<'_, AppState>, id: String, data: Value) -> Cmd<Item> {
     let item = run(&state, |s| s.save_canvas(&id, data))?;
     changed(&app, "canvas");
-    embed::schedule(&app, vec![item.id.clone()]);
     Ok(item)
-}
-
-// ---------------------------------------------------------------- app state in the vault
-
-/// Small JSON files the app keeps in `<vault>/.brain/<name>.json` (review
-/// schedule, …): they travel with the vault and are ignored by Obsidian.
-#[tauri::command]
-pub async fn get_brain_state(state: State<'_, AppState>, name: String) -> Cmd<Value> {
-    run(&state, |s| s.vault.brain_state(&name))
-}
-
-#[tauri::command]
-pub async fn set_brain_state(state: State<'_, AppState>, name: String, value: Value) -> Cmd<()> {
-    run(&state, |s| s.vault.set_brain_state(&name, &value))
 }
 
 // ---------------------------------------------------------------- folders (file explorer)
@@ -263,13 +188,12 @@ pub async fn create_folder(app: AppHandle, state: State<'_, AppState>, path: Str
     Ok(p)
 }
 
-/// Returns [old id, new id] pairs for items whose id followed their path.
+/// Returns [old path, new path] for every file that moved.
 #[tauri::command]
-pub async fn rename_folder(app: AppHandle, state: State<'_, AppState>, from: String, to: String) -> Cmd<Vec<(String, String)>> {
-    let ids = run(&state, |s| s.rename_folder(&from, &to))?;
+pub async fn rename_folder(app: AppHandle, state: State<'_, AppState>, from: String, to: String) -> Cmd<Moved> {
+    let moved = run(&state, |s| s.rename_folder(&from, &to))?;
     changed(&app, "folders");
-    embed::backfill(&app);
-    Ok(ids)
+    Ok(moved)
 }
 
 #[tauri::command]
@@ -280,9 +204,16 @@ pub async fn delete_folder(app: AppHandle, state: State<'_, AppState>, path: Str
 }
 
 #[tauri::command]
-pub async fn move_item(app: AppHandle, state: State<'_, AppState>, id: String, folder: String) -> Cmd<Vec<(String, String)>> {
-    let ids = run(&state, |s| s.move_item(&id, &folder))?;
+pub async fn move_item(app: AppHandle, state: State<'_, AppState>, id: String, folder: String) -> Cmd<Moved> {
+    let moved = run(&state, |s| s.move_item(&id, &folder))?;
     changed(&app, "items");
-    embed::backfill(&app);
-    Ok(ids)
+    Ok(moved)
+}
+
+/// Sets a folder's colour (`#rrggbb`), or clears it with `null`.
+#[tauri::command]
+pub async fn set_folder_color(app: AppHandle, state: State<'_, AppState>, folder: String, color: Option<String>) -> Cmd<Colors> {
+    let c = run(&state, |s| s.set_color(&folder, color.as_deref()))?;
+    changed(&app, "colors");
+    Ok(c)
 }

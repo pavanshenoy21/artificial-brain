@@ -1,64 +1,62 @@
-// Built-in commands for the Ctrl P palette. Later milestones register their
-// own (settings, capture, GitHub, AI) next to their code.
+// Built-in commands for the Ctrl P palette.
 
 import { registerCommand as reg } from "./palette/commands.js";
 import { app } from "./state.js";
-import { api, isDesktop } from "./api.js";
-import { newItem, newCanvas, importSample, openVaultFolder, rebuildIndex, deleteItem, syncGithub } from "./actions.js";
-import { TYPES } from "./lib/types.js";
+import { isDesktop } from "./api.js";
+import {
+  newNote, newCanvas, newFolder, openDaily, importSample, openVaultFolder, rebuildIndex, deleteItem, moveItem, wikilinkTo,
+} from "./actions.js";
 import { toast } from "./shell/toast.js";
-import { openNewDialog } from "./forms/new-dialog.js";
-import { polishItem, summarizeItem, fillFormItem, aiOn, AI_OFF } from "./ai/actions.js";
+import { pickFolder } from "./sidebar/menus.js";
+import { folderOf } from "./lib/folders.js";
 
-export function registerCoreCommands({ graph, tabs, left, right, search, setTheme }) {
+export function registerCoreCommands({ graph, tabs, left, right, search, setTheme, openSettings }) {
   const itemTab = () => (tabs.active?.kind === "item" ? tabs.active : null);
   const current = () => app.items.get(itemTab()?.id || app.selected);
+  // new files go next to the open one, like Obsidian's "same folder as current file"
+  const here = () => folderOf(current()?.path || "");
 
-  // notes open straight in the editor; typed items get a form first
-  for (const t of TYPES.filter(t => !t.file))
-    reg({ id: `new-${t.id}`, title: `New ${t.one.toLowerCase()}`, iconName: "plus", keys: t.id === "note" ? "Ctrl N" : undefined,
-      run: () => (t.id === "note" ? newItem("note") : openNewDialog(t.id)) });
+  reg({ id: "new-note", title: "Create new note", iconName: "new-note", keys: "Ctrl N", run: () => newNote() });
+  reg({ id: "new-note-here", title: "Create new note in the current folder", iconName: "new-note", when: () => !!here(), run: () => newNote(here()) });
+  reg({ id: "new-folder", title: "Create new folder", iconName: "folder-plus", run: () => newFolder(here()) });
+  reg({ id: "new-canvas", title: "Create new canvas", iconName: "canvas", run: () => newCanvas(here()) });
+  reg({ id: "daily", title: "Open today's daily note", iconName: "calendar", keys: "Ctrl Shift D", run: () => openDaily(0) });
+  reg({ id: "daily-prev", title: "Open yesterday's daily note", iconName: "calendar", run: () => openDaily(-1) });
+  reg({ id: "daily-next", title: "Open tomorrow's daily note", iconName: "calendar", run: () => openDaily(1) });
 
-  reg({ id: "new-canvas", title: "New canvas", iconName: "canvas", run: () => newCanvas() });
-  reg({ id: "capture", title: "Quick capture", iconName: "capture", keys: "Ctrl Shift Space", run: () => api.openCapture() });
   reg({ id: "search", title: "Search", iconName: "search", keys: "Ctrl K", run: search });
-  reg({ id: "graph", title: "Show graph", iconName: "graph", keys: "Ctrl G", run: () => tabs.activate("graph") });
+  reg({ id: "graph", title: "Open graph view", iconName: "graph", keys: "Ctrl G", run: () => tabs.activate("graph") });
   reg({ id: "toggle-view", title: "Toggle 2D / 3D graph", iconName: "graph", keys: "V", run: () => { tabs.activate("graph"); graph.toggleView(); } });
   reg({ id: "fit-graph", title: "Fit graph in view", iconName: "graph", run: () => { tabs.activate("graph"); graph.fitAll(); } });
   reg({ id: "clear-focus", title: "Clear graph focus", iconName: "graph", keys: "Esc", run: () => graph.clearFocus() });
+  reg({ id: "focus-folder", title: "Focus the current folder in the graph", iconName: "graph", when: () => !!here(),
+    run: () => { tabs.activate("graph"); graph.focusFolder(here()); } });
   reg({ id: "toggle-theme", title: "Toggle light / dark theme", iconName: "sun",
     run: () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") });
   reg({ id: "toggle-left", title: "Toggle left sidebar", iconName: "panel-left", run: () => left.toggle() });
   reg({ id: "toggle-right", title: "Toggle right sidebar", iconName: "panel-right", run: () => right.toggle() });
-  reg({ id: "show-files", title: "Show files", iconName: "files", run: () => left.show("files") });
+  reg({ id: "show-files", title: "Show file explorer", iconName: "files", run: () => left.show("files") });
   reg({ id: "show-tags", title: "Show tags", iconName: "tags", run: () => left.show("tags") });
-  reg({ id: "show-inbox", title: "Show inbox", iconName: "inbox", run: () => left.show("inbox") });
+  reg({ id: "show-backlinks", title: "Show backlinks", iconName: "backlinks", run: () => right.show("backlinks") });
+  reg({ id: "show-outgoing", title: "Show outgoing links", iconName: "outgoing", run: () => right.show("outgoing") });
+  reg({ id: "show-outline", title: "Show outline", iconName: "outline", run: () => right.show("outline") });
 
-  reg({ id: "toggle-reading", title: "Toggle reading view", iconName: "read", keys: "Ctrl E", when: () => !!itemTab(), run: () => itemTab().view.toggleMode() });
+  reg({ id: "toggle-reading", title: "Toggle reading view", iconName: "read", keys: "Ctrl E", when: () => !!itemTab(), run: () => itemTab().view.toggleMode?.() });
   reg({ id: "close-tab", title: "Close tab", iconName: "x", keys: "Ctrl W", when: () => !!itemTab(), run: () => tabs.closeActive() });
-  reg({ id: "rename", title: "Rename current item", iconName: "edit", when: () => !!itemTab(),
-    run: () => { const el = itemTab().pane.querySelector(".doc-title-input, .cv-title"); el.focus(); el.select(); } });
-  reg({ id: "open-selected", title: "Open selected item in a tab", iconName: "file", when: () => !!app.selected && !itemTab(), run: () => app.open(app.selected) });
-  reg({ id: "copy-link", title: "Copy wikilink to current item", iconName: "copy", when: () => !!current(), run: async () => {
-    const n = current();
-    const stem = (n.path || "").split("/").pop().replace(/\.md$/, "") || n.title;
-    const link = stem === n.title ? `[[${n.title}]]` : n.type === "canvas" ? `[[${stem}]]` : `[[${stem}|${n.title}]]`;
+  reg({ id: "rename", title: "Rename file", iconName: "edit", keys: "F2", when: () => !!current(), run: () => app.emit("rename-file", current().id) });
+  reg({ id: "move", title: "Move file to another folder", iconName: "folder", when: () => !!current(),
+    run: () => pickFolder(`Move "${current().title}" to…`, f => moveItem(current().id, f), here()) });
+  reg({ id: "reveal", title: "Reveal file in explorer", iconName: "files", when: () => !!current(), run: () => app.emit("reveal", current().id) });
+  reg({ id: "copy-link", title: "Copy link to current file", iconName: "copy", when: () => !!current(), run: async () => {
+    const link = wikilinkTo(current());
     try { await navigator.clipboard.writeText(link); toast(`Copied ${link}`); } catch { toast("Clipboard not available", "error"); }
   } });
-  reg({ id: "delete", title: "Delete current item (move to .trash)", iconName: "trash", when: () => !!current(), run: () => deleteItem(current().id) });
+  reg({ id: "delete", title: "Delete current file", iconName: "trash", when: () => !!current(), run: () => deleteItem(current().id) });
 
-  reg({ id: "sync-github", title: "Sync GitHub projects", iconName: "github",
-    disabled: () => (app.settings?.github?.token ? false : "Add a GitHub token in Settings"), run: syncGithub });
-  const ai = () => (aiOn() ? false : AI_OFF);
-  const textItem = () => !!current() && current().type !== "canvas";
-  reg({ id: "ai-polish", title: "Polish current item", iconName: "edit", when: textItem, disabled: ai, run: () => polishItem(current().id) });
-  reg({ id: "ai-summarize", title: "Summarize current item", iconName: "read", when: textItem, disabled: ai, run: () => summarizeItem(current().id) });
-  reg({ id: "ai-fill", title: "Fill form from the note text", iconName: "filters", when: () => textItem() && current().type !== "note", disabled: ai, run: () => fillFormItem(current().id) });
-  reg({ id: "ai-suggest", title: "Suggest tags and lobe", iconName: "tags", when: textItem, disabled: ai,
-    run: () => { app.select(current().id, { source: "list" }); app.emit("suggest", current().id); } });
+  reg({ id: "settings", title: "Open settings", iconName: "settings", run: openSettings });
   reg({ id: "rebuild-index", title: "Rebuild index", iconName: "refresh", run: rebuildIndex });
   reg({ id: "reload", title: "Reload vault", iconName: "refresh", run: () => app.reload() });
-  reg({ id: "import-sample", title: "Import sample data", iconName: "download", run: importSample });
+  reg({ id: "import-sample", title: "Import sample vault", iconName: "download", run: importSample });
   reg({ id: "open-vault", title: "Open another vault folder", iconName: "folder",
     disabled: () => (isDesktop ? false : "Works in the desktop app"), run: openVaultFolder });
 }

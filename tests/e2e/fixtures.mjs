@@ -26,14 +26,6 @@ export const byTitle = (page, title) =>
 
 export const idOf = async (page, title) => (await byTitle(page, title))?.id;
 
-// Turn on the browser preview's fake AI (deterministic, no network).
-export async function aiOn(page) {
-  await page.evaluate(async () => {
-    const s = await window.brain.api.getSettings();
-    s.ai.provider = "groq";
-    s.ai.base_url = "https://api.groq.com/openai/v1";
-    const r = await window.brain.api.saveSettings(s);
-    window.brain.app.settings = r;
-    window.brain.app.emit("settings", r);
-  });
-}
+// What the backend holds for a path (the "file on disk" in the browser preview).
+export const fileOf = (page, path) => page.evaluate(p => window.brain.api.getItem(p), path);
+export const active = page => page.locator(".pane:not([hidden])");

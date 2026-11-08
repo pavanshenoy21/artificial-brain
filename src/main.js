@@ -8,22 +8,19 @@ import { status } from "./shell/statusbar.js";
 import { createGraphView } from "./graph/view.js";
 import { initLeftSidebar } from "./sidebar/left.js";
 import { initRightSidebar } from "./sidebar/right.js";
+import { fileMenu } from "./sidebar/menus.js";
 import { itemTab } from "./editor/item-tab.js";
 import { openSearch } from "./palette/search.js";
 import { paletteOpen, close as closePalette } from "./palette/palette.js";
 import { travel } from "./travel.js";
-import { typeIcon } from "./icons.js";
+import { itemIcon } from "./icons.js";
 import { esc, reduceMotion } from "./util.js";
 import { prefs } from "./lib/prefs.js";
 import { initEmptyState } from "./shell/empty.js";
-import { newItem, newCanvas, openDaily } from "./actions.js";
+import { newNote, newCanvas, openDaily } from "./actions.js";
 import { openCommands } from "./palette/commands.js";
 import { registerCoreCommands } from "./core-commands.js";
-import { settingsTab, PROVIDERS } from "./settings/view.js";
-import { setSemanticSearch } from "./palette/search.js";
-import { registerCommand } from "./palette/commands.js";
-import { initAsk } from "./ai/ask.js";
-import { reviewTab, initReviewStatus } from "./review/view.js";
+import { settingsTab } from "./settings/view.js";
 
 // ------------------------------------------------------------------ tabs + graph
 let graph;
@@ -36,15 +33,11 @@ tabs.register("graph", pane => {
 });
 tabs.register("item", itemTab);
 tabs.register("settings", settingsTab);
-tabs.register("review", reviewTab);
-const openReview = () => tabs.openView("review", { title: "Review", iconName: "review" });
-app.on("open-review", openReview);
 const openSettings = () => tabs.openView("settings", { title: "Settings", iconName: "settings" });
 tabs.addGraph();
 
 const rightSide = initRightSidebar();
 initLeftSidebar({ graph });
-const ask = initAsk({ highlight: (ids, label) => { tabs.activate("graph"); graph.highlight(ids, label); } });
 
 // ------------------------------------------------------------------ selection / opening
 const graphActive = () => tabs.active?.kind === "graph";
@@ -57,28 +50,28 @@ app.on("select", ({ id, source }) => {
 app.on("open", ({ id, mode, focusTitle }) => tabs.openItem(id, { mode, focusTitle }));
 app.on("show-graph", () => tabs.activate("graph"));
 app.on("graph-focus-cleared", () => { app.selected = null; app.emit("select", { id: null }); });
+app.on("file-menu", ({ id, at }) => fileMenu(id, at));
 app.on("data", () => {
   graph.setData();
   tabs.refresh();
 });
 
-// Search pick: in the graph tab, fly to the node and send a card to the sidebar;
-// elsewhere (or with Ctrl Enter) open it in a tab.
+// Search pick: in the graph tab, fly to the note and send a card to the
+// sidebar; elsewhere (or with Ctrl Enter, or for a canvas) open it in a tab.
 let travelling = false;
 async function openFromSearch(n, { alt } = {}) {
-  if (alt || !graphActive()) { app.open(n.id); return; }
+  if (alt || !graphActive() || n.type !== "note") { app.open(n.id); return; }
   if (travelling) return;
   travelling = true;
   try {
-    right.show("item");
+    right.show("backlinks");
     graph.focusNode(n);
     const flyMs = reduceMotion() ? 0 : 700;
     await new Promise(r => setTimeout(r, flyMs + 30));
-    const lobe = app.lobeOf(n);
     await travel({
       from: graph.screenPos(n),
       to: rightSide.rect(),
-      html: `${typeIcon(n.type, lobe.color, 13)}<span>${esc(n.title)}</span>`,
+      html: `${itemIcon(n, app.colorOf(n))}<span>${esc(n.title)}</span>`,
       layer: document.getElementById("fx-layer"),
     });
     app.select(n.id, { source: "graph-search" });
@@ -91,27 +84,15 @@ const search = () => openSearch({ onPick: openFromSearch });
 // ------------------------------------------------------------------ ribbon
 ribbonButton({ iconName: "panel-left", title: "Toggle left sidebar", onClick: () => left.toggle() });
 ribbonButton({ iconName: "search", title: "Search (Ctrl K)", onClick: search });
-ribbonButton({ iconName: "graph", title: "Graph (Ctrl G)", onClick: () => tabs.activate("graph") });
-ribbonButton({ iconName: "command", title: "Commands (Ctrl P)", onClick: openCommands });
-ribbonButton({ iconName: "plus", title: "New note (Ctrl N)", onClick: () => newItem("note") });
-ribbonButton({ iconName: "capture", title: "Quick capture (Ctrl Shift Space)", onClick: () => api.openCapture() });
-ribbonButton({ iconName: "calendar", title: "Today's note (Ctrl Shift D)", onClick: () => openDaily(0) });
-ribbonButton({ iconName: "canvas", title: "New canvas", onClick: () => newCanvas() });
-ribbonButton({ iconName: "review", title: "Review flashcards", onClick: openReview });
-
+ribbonButton({ iconName: "graph", title: "Graph view (Ctrl G)", onClick: () => tabs.activate("graph") });
+ribbonButton({ iconName: "canvas", title: "Create new canvas", onClick: () => newCanvas() });
+ribbonButton({ iconName: "calendar", title: "Open today's daily note (Ctrl Shift D)", onClick: () => openDaily(0) });
+ribbonButton({ iconName: "command", title: "Command palette (Ctrl P)", onClick: openCommands });
 ribbonButton({
   iconName: "sun", title: "Toggle theme", bottom: true,
   onClick: () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"),
 });
-ribbonButton({ iconName: "settings", title: "Settings", bottom: true, onClick: () => openSettings() });
-registerCommand({ id: "settings", title: "Open settings", iconName: "settings", run: () => openSettings() });
-registerCommand({ id: "ask", title: "Ask your notes", iconName: "ask", run: () => ask.focus() });
-registerCommand({ id: "daily", title: "Open today's daily note", iconName: "calendar", keys: "Ctrl Shift D", run: () => openDaily(0) });
-registerCommand({ id: "daily-prev", title: "Open yesterday's daily note", iconName: "calendar", run: () => openDaily(-1) });
-registerCommand({ id: "daily-next", title: "Open tomorrow's daily note", iconName: "calendar", run: () => openDaily(1) });
-registerCommand({ id: "review", title: "Review flashcards", iconName: "review", run: openReview });
-registerCommand({ id: "show-tasks", title: "Show tasks", iconName: "tasks", run: () => left.show("tasks") });
-initReviewStatus();
+ribbonButton({ iconName: "settings", title: "Settings", bottom: true, onClick: openSettings });
 
 // Theme: settings.json is the truth; prefs keep a copy so the first paint is right.
 function applyTheme(t) {
@@ -127,43 +108,35 @@ function setTheme(t) {
 }
 app.on("theme", applyTheme);
 
-// ------------------------------------------------------------------ AI status
-function showAi(s) {
-  const p = s?.ai?.provider;
-  if (!p || !s.ai.base_url) status.set("ai", "AI off", "No AI provider configured (Settings)");
-  else status.set("ai", `AI: ${PROVIDERS[p]?.name.replace(/ \(local\)$/, "") || p}`, [s.ai.model, s.ai.base_url].filter(Boolean).join(" · "));
-  setSemanticSearch(s?.embed?.base_url ? q => api.semanticSearch(q, 20) : null);
-}
-app.on("settings", showAi);
-api.on("settings-changed", s => { app.settings = s; showAi(s); });
-api.on("embed-status", st => {
-  if (st.state === "working") status.set("embed", `Embedding ${st.done}/${st.total}`, "");
-  else if (st.state === "error") status.set("embed", "Embeddings unavailable", st.message);
-  else status.set("embed", "");
-});
-
-registerCoreCommands({ graph, tabs, left, right, search, setTheme });
+registerCoreCommands({ graph, tabs, left, right, search, setTheme, openSettings });
 
 // ------------------------------------------------------------------ keyboard
 const typing = () => {
   const a = document.activeElement;
   return a && (/INPUT|TEXTAREA|SELECT/.test(a.tagName) || a.isContentEditable || a.closest?.(".cm-editor"));
 };
+const currentFile = () => (tabs.active?.kind === "item" ? tabs.active.id : app.selected);
 
 window.addEventListener("keydown", e => {
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
-  if (mod && k === "k") { e.preventDefault(); paletteOpen() ? closePalette() : search(); return; }
+  if (mod && (k === "k" || k === "o")) { e.preventDefault(); paletteOpen() ? closePalette() : search(); return; }
   if (mod && k === "p") { e.preventDefault(); paletteOpen() ? closePalette() : openCommands(); return; }
   if (paletteOpen()) return;
   if (!mod && e.key === "/" && !typing()) { e.preventDefault(); search(); return; }
   if (mod && k === "g") { e.preventDefault(); tabs.activate("graph"); return; }
   if (mod && k === "w") { e.preventDefault(); tabs.closeActive(); return; }
   if (mod && e.key === "Tab") { e.preventDefault(); tabs.next(e.shiftKey ? -1 : 1); return; }
-  if (mod && k === "n" && !e.shiftKey) { e.preventDefault(); newItem("note"); return; }
+  if (mod && k === "n" && !e.shiftKey) { e.preventDefault(); newNote(); return; }
   if (mod && e.shiftKey && k === "d") { e.preventDefault(); openDaily(0); return; }
   if (mod && k === "e") { e.preventDefault(); tabs.active?.view.toggleMode?.(); return; }
-  if (mod && e.key === "Enter" && !typing()) { e.preventDefault(); app.emit("accept-suggestions"); return; }
+  if (e.key === "F2" && currentFile() && !document.activeElement?.closest?.(".rename-input")) {
+    e.preventDefault();
+    // an open file: edit its inline title, like Obsidian; else rename in the explorer
+    const title = tabs.active?.kind === "item" && tabs.active.pane.querySelector(".doc-title-input, .cv-title");
+    if (title) { title.focus(); title.select(); } else app.emit("rename-file", currentFile());
+    return;
+  }
   if (typing() || mod || e.altKey) return;
   if (graphActive()) {
     if (k === "v") graph.toggleView();
@@ -182,23 +155,7 @@ app.on("vault", showVault);
 showVault(await api.vaultInfo());
 app.settings = await api.getSettings().catch(() => null);
 if (app.settings?.theme && app.settings.theme !== document.documentElement.dataset.theme) applyTheme(app.settings.theme);
-showAi(app.settings);
 
-// status bar: when GitHub projects were last synced
-const ago = iso => {
-  const m = Math.round((Date.now() - new Date(iso)) / 60000);
-  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
-};
-async function showGithub() {
-  const g = await api.githubStatus().catch(() => null);
-  if (g?.configured) status.set("github", g.last_sync ? `GitHub synced ${ago(g.last_sync)}` : "GitHub not synced yet", g.last_sync || "");
-  else status.set("github", "");
-}
-app.on("github", showGithub);
-app.on("settings", showGithub);
-api.on("github-progress", p => status.set("github", `GitHub ${p.done}/${p.total}`));
-api.on("github-error", msg => { status.set("github", "GitHub sync failed", msg); });
-showGithub();
 try {
   await app.reload();
 } catch (e) {

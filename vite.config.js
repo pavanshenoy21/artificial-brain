@@ -8,7 +8,5 @@ export default defineConfig({
   build: {
     target: "es2022",
     chunkSizeWarningLimit: 3000,
-    // two pages: the main window and the quick-capture window
-    rolldownOptions: { input: { main: "index.html", capture: "capture.html" } },
   },
 });

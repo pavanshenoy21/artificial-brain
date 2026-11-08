@@ -1,10 +1,10 @@
 // The only place the frontend talks to the backend. Inside Tauri this calls
 // the Rust commands (src-tauri/src/commands.rs); in a plain browser it uses the
-// in-memory mock backend (seeded with sample data), so `npm run dev` and
+// in-memory mock backend (seeded with the sample vault), so `npm run dev` and
 // Playwright work without a display.
 
 import { createMockBackend } from "./mock/backend.js";
-import { buildSampleGraph } from "./data/sample.js";
+import { sampleFiles } from "./data/sample.js";
 
 export const isDesktop = !!window.__TAURI_INTERNALS__;
 
@@ -24,49 +24,32 @@ async function rememberVault(info) {
 
 function tauriBackend() {
   return {
-    loadGraph: () => call("get_graph"),                       // { nodes, links, lobes }
+    loadGraph: () => call("get_graph"),                       // { nodes, folders, links, colors }
     getItem: id => call("get_item", { id }),
-    createItem: input => call("create_item", { input }),      // { type, title, lobe?, tags?, body?, ...fields }
-    updateItem: (id, patch) => call("update_item", { id, patch }), // null removes a field
+    createItem: input => call("create_item", { input }),      // { title?, body?, folder?, tags?, ...properties }
+    updateItem: (id, patch) => call("update_item", { id, patch }), // returns the item (new id if renamed)
     deleteItem: id => call("delete_item", { id }),            // moves the file to .trash
     listTags: () => call("list_tags"),                        // [[tag, count]]
     search: (query, limit = 20) => call("search", { query, limit }), // [{ id, score, snippet }]
-    importSample: () => call("import_sample", buildSampleGraph()),
+    importSample: () => call("import_sample", { files: sampleFiles() }),
     rebuildIndex: () => call("rebuild_index"),
-    listLobes: () => call("list_lobes"),
-    saveLobes: lobes => call("save_lobes", { lobes }),
     vaultInfo: () => call("vault_info").then(rememberVault),  // { path, items, error }
     openVault: path => call("open_vault", { path }).then(rememberVault),
-    fileUrl: rel => (fileBase && convertFileSrc ? convertFileSrc(`${fileBase}/${rel}`) : null),
-    createCanvas: title => call("create_canvas", { title }),
-    getCanvas: id => call("get_canvas", { id }),               // JSON Canvas: { nodes, edges }
-    saveCanvas: (id, data) => call("save_canvas", { id, data }),
-    getState: name => call("get_brain_state", { name }),      // .brain/<name>.json or null
-    setState: (name, value) => call("set_brain_state", { name, value }),
     async pickFolder() {
       const { open } = await import("@tauri-apps/plugin-dialog");
       return open({ directory: true, title: "Choose a vault folder" });
     },
-    capture: text => call("capture", { text }),              // { item, existing }
-    refetchLink: id => call("refetch_link", { id }),
-    openCapture: () => call("open_capture"),
-    hideCapture: () => call("hide_capture"),
-    getSettings: () => call("get_settings"),                  // secrets come back as "__saved__"
+    getSettings: () => call("get_settings"),
     saveSettings: settings => call("save_settings", { settings }),
-    testAi: settings => call("test_ai", { settings }),       // { ok, message }
-    testEmbed: settings => call("test_embed", { settings }),
-    semanticSearch: (query, limit = 20) => call("semantic_search", { query, limit }), // [{ id, score }]
-    embedStatus: () => call("embed_status"),                  // { state, done, total, message }
-    embedAll: () => call("embed_all"),
-    aiPolish: text => call("ai_polish", { text }),
-    aiSummarize: text => call("ai_summarize", { text }),
-    aiFillForm: (kind, text) => call("ai_fill_form", { kind, text }),  // { field: value }
-    aiSuggest: id => call("ai_suggest", { id }),              // { tags, lobe }
-    aiApply: (id, patch) => call("ai_apply", { id, patch }),   // keeps the original in .brain/history
-    ask: (question, history = []) => call("ask", { question, history }), // { answer|null, sources, cited, retrieval }
-    githubSync: () => call("github_sync"),                    // { total, created, updated, last_sync }
-    githubStatus: () => call("github_status"),                // { configured, last_sync }
-    githubTest: settings => call("github_test", { settings }),
+    fileUrl: rel => (fileBase && convertFileSrc ? convertFileSrc(`${fileBase}/${rel}`) : null),
+    createCanvas: (title, folder) => call("create_canvas", { title, folder }),
+    getCanvas: id => call("get_canvas", { id }),               // JSON Canvas: { nodes, edges }
+    saveCanvas: (id, data) => call("save_canvas", { id, data }),
+    createFolder: path => call("create_folder", { path }),
+    renameFolder: (from, to) => call("rename_folder", { from, to }), // [[old, new]] of moved files
+    deleteFolder: path => call("delete_folder", { path }),
+    moveItem: (id, folder) => call("move_item", { id, folder }),     // [[old, new]]
+    setFolderColor: (folder, color) => call("set_folder_color", { folder, color }),
     on(event, fn) {
       let un;
       let dead = false;

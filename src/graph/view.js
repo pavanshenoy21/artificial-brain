@@ -1,20 +1,25 @@
-// The graph tab: 3d-force-graph with a flat look (solid lobe colours, plain
-// lines), focus mode, semantic zoom, type filters, fly-to-lobe and a 2D/3D switch.
+// The graph tab: 3d-force-graph with a flat look.
+//
+// Structure comes from folders:
+//   lobe (top-level folder)   only its name, in the lobe's colour, at the root of a tree
+//   group (subfolder)         a small hub in the group's colour; its notes hang off it
+//   note                      a sphere in its group's colour
+// Tree lines (note -> hub -> lobe name) show where things live; plain grey
+// lines are your [[wikilinks]]. Focus mode, semantic zoom, fly-to-lobe and a
+// 2D/3D switch work on top of that.
 
 import ForceGraph3D from "3d-force-graph";
 import * as THREE from "three";
 import SpriteText from "three-spritetext";
 import { app } from "../state.js";
-import { GEOMETRIES, BASE_SIZE } from "./shapes.js";
-import { lobeCenters, UNSORTED } from "../lib/lobes.js";
-import { TYPES, TYPE } from "../lib/types.js";
-import { typeIcon } from "../icons.js";
+import { folderOf, lobeOf, lobeCenters } from "../lib/folders.js";
 import { esc, reduceMotion } from "../util.js";
 import { prefs } from "../lib/prefs.js";
-import { itemMenu } from "../ai/actions.js";
+import { fileMenu, folderMenu } from "../sidebar/menus.js";
 
 const idOf = x => (x && typeof x === "object" ? x.id : x);
 const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const depth = f => (f ? f.split("/").length : 0);
 
 export function createGraphView(container) {
   container.innerHTML = `
@@ -26,57 +31,61 @@ export function createGraphView(container) {
           <button type="button" data-mode="2d">2D</button><button type="button" data-mode="3d">3D</button>
         </div>
         <button type="button" class="btn-link" data-act="fit" title="Fit the whole graph in view">Fit</button>
-        <label class="check"><input type="checkbox" data-opt="similar" /> Similar</label>
+        <label class="check" title="Lines from notes to their folder and lobe"><input type="checkbox" data-opt="tree" /> Folders</label>
         <label class="check" data-orbit><input type="checkbox" data-opt="orbit" /> Orbit</label>
       </div>
     </div>
     <div class="graph-hint"><span data-hint-drag>drag to rotate</span> · scroll to zoom · click to focus · double-click to open</div>`;
   const el = container.querySelector(".graph-canvas");
 
-  // Types hidden by the filter are remembered; a type added in a later version
-  // (canvas) starts visible instead of hidden.
-  function savedTypes() {
-    const saved = prefs.get("graph.types", null);
-    const known = prefs.get("graph.types.known", ["note", "link", "skill", "hackathon", "project"]);
-    return new Set(TYPES.map(t => t.id).filter(id => !saved || saved.includes(id) || !known.includes(id)));
-  }
   const state = {
-    focus: null,           // { kind: "node", node } | { kind: "lobe", lobe }
-    levels: new Map(),     // id -> 0 focus, 1 neighbour, 2 second ring, 3 background
+    focus: null,           // { kind: "node", node } | { kind: "set", ids, label, color? }
+    levels: new Map(),     // note id -> 0 focus, 1 neighbour, 2 second ring, 3 background
     hover: null,
-    types: savedTypes(),
-    showSimilar: prefs.get("graph.similar", true),
+    showTree: prefs.get("graph.tree", true),
     orbit: prefs.get("graph.orbit", false),
     flat: prefs.get("graph.view", "3d") === "2d",
   };
   const level = n => (state.focus ? state.levels.get(idOf(n)) ?? 3 : 0);
-  let centers = new Map();
   let theme = {};
-
   function readTheme() {
-    theme = {
-      bg: cssVar("--graph-bg"), link: cssVar("--graph-link"), similar: cssVar("--graph-similar"),
-      label: cssVar("--graph-label"), accent: cssVar("--accent"),
-    };
+    theme = { bg: cssVar("--graph-bg"), link: cssVar("--graph-link"), label: cssVar("--graph-label"), accent: cssVar("--accent") };
   }
   readTheme();
 
   // ---------------------------------------------------------------- nodes
-  // Geometry is shared per (type, size step); labels are created the first
-  // time a node's label is shown. A vault of thousands of notes would
-  // otherwise build thousands of geometries and label textures up front.
+  // Graph nodes: every note (from app.items), one hub per subfolder and one
+  // label-only anchor per lobe. Hubs and anchors are kept across reloads so
+  // the layout doesn't jump.
+  const hubs = new Map();     // "folder:<path>" -> node
+  const anchors = new Map();  // "lobe:<name>" -> node
+  let nodes = [];             // what the force layout sees
+  const notes = () => [...app.items.values()].filter(n => n.type === "note");
+  const colorOf = n => (n.kind === "folder" ? app.scheme.folder(n.path) : n.kind === "lobe" ? app.scheme.lobe(n.name) : app.colorOf(n));
+
   const geoCache = new Map();
-  function geometry(type, size) {
+  const sphere = size => {
     const step = Math.round(size * 4) / 4;
-    const key = `${type}:${step}`;
-    if (!geoCache.has(key)) geoCache.set(key, (GEOMETRIES[type] || GEOMETRIES.note)(step));
-    return geoCache.get(key);
-  }
+    if (!geoCache.has(step)) geoCache.set(step, new THREE.SphereGeometry(step, 18, 12));
+    return geoCache.get(step);
+  };
+  const font = () => cssVar("--font") || "system-ui, sans-serif";
 
   function makeNode(n) {
-    const size = (BASE_SIZE[n.type] || 3) * (1 + Math.min(n.degree || 0, 8) * 0.05);
-    const mesh = new THREE.Mesh(geometry(n.type, size), new THREE.MeshLambertMaterial({ color: app.lobeOf(n).color }));
     const group = new THREE.Group();
+    if (n.kind === "lobe") {
+      // a lobe is only its name
+      const label = new SpriteText(n.name, 7, colorOf(n));
+      Object.assign(label, { fontFace: font(), fontWeight: "600", renderOrder: 5 });
+      label.material.depthTest = false;
+      label.material.depthWrite = false;
+      label.material.transparent = true;
+      group.add(label);
+      n.__v = { group, label, mesh: null, size: 0 };
+      return group;
+    }
+    const size = n.kind === "folder" ? 1.9 : 3 * (1 + Math.min(n.degree || 0, 8) * 0.05);
+    const mesh = new THREE.Mesh(sphere(size), new THREE.MeshLambertMaterial({ color: colorOf(n) }));
     group.add(mesh);
     n.__v = { mesh, group, label: null, size };
     return group;
@@ -85,65 +94,58 @@ export function createGraphView(container) {
   function ensureLabel(n) {
     const v = n.__v;
     if (v.label) return v.label;
-    const label = new SpriteText(n.title, 2.1, theme.label);
-    label.fontFace = cssVar("--font") || "system-ui, sans-serif";
-    label.fontWeight = "500";
+    const hub = n.kind === "folder";
+    const label = new SpriteText(hub ? n.name : n.title, hub ? 3 : 2.1, hub ? colorOf(n) : theme.label);
+    Object.assign(label, { fontFace: font(), fontWeight: hub ? "600" : "500", renderOrder: 10 });
     label.position.y = -(v.size * 1.4 + 3);
     label.material.depthTest = false;
     label.material.depthWrite = false;
-    label.renderOrder = 10;
     v.group.add(label);
     v.label = label;
     return label;
   }
 
-  // One selection outline, moved to whichever node is focused: a slightly
-  // larger back-face shell in the accent colour.
+  // One selection outline, moved to whichever node is focused.
   const outline = new THREE.Mesh(undefined, new THREE.MeshBasicMaterial({ color: theme.accent, side: THREE.BackSide, transparent: true }));
   outline.scale.setScalar(1.28);
 
   // ---------------------------------------------------------------- links
-  // All links are drawn as two merged batches (solid wikilinks, dashed
-  // similar) with per-vertex colour + alpha, instead of one object per link:
-  // thousands of separate lines made large vaults crawl.
-  const linkMat = {
-    explicit: new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }),
-    similar: new THREE.LineDashedMaterial({ vertexColors: true, transparent: true, depthWrite: false, dashSize: 2, gapSize: 2.5 }),
-  };
+  // Two merged line batches with per-vertex colour + alpha: wikilinks (grey)
+  // and the folder tree (in the child's colour). One object per link made big
+  // vaults crawl.
   const batches = {
-    explicit: new THREE.LineSegments(new THREE.BufferGeometry(), linkMat.explicit),
-    similar: new THREE.LineSegments(new THREE.BufferGeometry(), linkMat.similar),
+    wiki: new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false })),
+    tree: new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false })),
   };
   for (const b of Object.values(batches)) { b.renderOrder = -1; b.frustumCulled = false; }
-  let shown = { explicit: [], similar: [] }; // visible links per batch
+  let graphLinks = [];
+  let shown = { wiki: [], tree: [] };
 
-  const isFocusEdge = l =>
-    state.focus?.kind === "node" && (idOf(l.source) === state.focus.node.id || idOf(l.target) === state.focus.node.id);
+  const nodeOf = x => (x && typeof x === "object" ? x : app.items.get(x) || hubs.get(x) || anchors.get(x));
+  // a hub's or anchor's focus level: the closest of its notes
+  const levelOf = n => (n.kind ? Math.min(3, ...[...n.members].map(id => level(id))) : level(n));
+  const isFocusEdge = l => state.focus?.kind === "node" && (idOf(l.source) === state.focus.node.id || idOf(l.target) === state.focus.node.id);
 
   function linkStyle(l) {
-    const explicit = l.kind === "explicit";
-    let a;
-    if (!state.focus) a = explicit ? 0.9 : 0.7;
-    else {
-      const worst = Math.max(level(l.source), level(l.target));
-      if (isFocusEdge(l)) a = 1;
-      else if (worst <= 1) a = explicit ? 0.7 : 0.4;
-      else if (worst <= 2) a = 0.15;
-      else a = 0.05;
+    const a0 = levelOf(nodeOf(l.source)), b0 = levelOf(nodeOf(l.target));
+    const worst = Math.max(a0, b0);
+    if (l.kind === "tree") {
+      const child = nodeOf(l.source);
+      const a = !state.focus ? 0.4 : worst <= 1 ? 0.55 : worst <= 2 ? 0.12 : 0.04;
+      return [colorOf(child), a];
     }
-    return [isFocusEdge(l) && explicit ? theme.accent : explicit ? theme.link : theme.similar, a];
+    let a;
+    if (!state.focus) a = 0.85;
+    else if (isFocusEdge(l)) a = 1;
+    else if (worst <= 1) a = 0.6;
+    else if (worst <= 2) a = 0.15;
+    else a = 0.05;
+    return [isFocusEdge(l) ? theme.accent : theme.link, a];
   }
 
-  const linkVisible = l => {
-    const s = app.items.get(idOf(l.source)), t = app.items.get(idOf(l.target));
-    return !!s && !!t && (l.kind === "explicit" || state.showSimilar) && state.types.has(s.type) && state.types.has(t.type);
-  };
-
-  // Which links are drawn (after data, filter or similar-toggle changes).
   function rebuildLinks() {
-    shown = { explicit: [], similar: [] };
-    for (const l of graphLinks) if (linkVisible(l)) shown[l.kind === "explicit" ? "explicit" : "similar"].push(l);
-    for (const k of ["explicit", "similar"]) {
+    shown = { wiki: graphLinks.filter(l => l.kind === "wiki"), tree: state.showTree ? graphLinks.filter(l => l.kind === "tree") : [] };
+    for (const k of ["wiki", "tree"]) {
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(shown[k].length * 6), 3));
       g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(shown[k].length * 8), 4));
@@ -154,9 +156,8 @@ export function createGraphView(container) {
     colorLinks();
   }
 
-  const nodeOf = x => (x && typeof x === "object" ? x : app.items.get(x));
   function positionLinks() {
-    for (const k of ["explicit", "similar"]) {
+    for (const k of ["wiki", "tree"]) {
       const pos = batches[k].geometry.attributes.position;
       if (!pos) continue;
       shown[k].forEach((l, i) => {
@@ -166,13 +167,12 @@ export function createGraphView(container) {
         pos.setXYZ(i * 2 + 1, b.x || 0, b.y || 0, b.z || 0);
       });
       pos.needsUpdate = true;
-      if (k === "similar") batches[k].computeLineDistances();
     }
   }
 
   const tmpColor = new THREE.Color();
   function colorLinks() {
-    for (const k of ["explicit", "similar"]) {
+    for (const k of ["wiki", "tree"]) {
       const col = batches[k].geometry.attributes.color;
       if (!col) continue;
       shown[k].forEach((l, i) => {
@@ -186,18 +186,27 @@ export function createGraphView(container) {
   }
 
   // ---------------------------------------------------------------- graph
+  const tip = n => {
+    if (n.kind === "lobe") return `<div class="tip"><span class="dot" style="background:${colorOf(n)}"></span><b>${esc(n.name)}</b><span>${n.members.size} notes</span></div>`;
+    if (n.kind === "folder") return `<div class="tip"><span class="dot" style="background:${colorOf(n)}"></span><b>${esc(n.name)}</b><span>${esc(n.path)} · ${n.members.size} notes</span></div>`;
+    return `<div class="tip"><span class="dot" style="background:${colorOf(n)}"></span><b>${esc(n.title)}</b><span>${esc(folderOf(n.path) || "vault root")}</span></div>`;
+  };
   const Graph = new ForceGraph3D(el, { controlType: "orbit" })
     .backgroundColor(theme.bg)
     .showNavInfo(false)
     .nodeThreeObject(makeNode)
-    .nodeLabel(n => `<div class="tip">${typeIcon(n.type, app.lobeOf(n).color, 12)}<b>${esc(n.title)}</b><span>${esc(TYPE[n.type]?.one || "")}</span></div>`)
-    .nodeVisibility(n => state.types.has(n.type))
+    .nodeLabel(tip)
     .linkVisibility(false) // drawn by the merged batches above
     .onNodeClick(onNodeClick)
-    .onNodeRightClick((n, e) => itemMenu(n.id, { x: e.clientX, y: e.clientY }))
+    .onNodeRightClick((n, e) => {
+      const at = { x: e.clientX, y: e.clientY };
+      if (n.kind === "folder") folderMenu(n.path, at);
+      else if (n.kind === "lobe") folderMenu(n.name, at);
+      else fileMenu(n.id, at);
+    })
     .onNodeHover(n => { state.hover = n; el.style.cursor = n ? "pointer" : ""; })
     .onBackgroundClick(() => { if (state.focus) api.clearFocus(); })
-    .onEngineTick(() => { engineRunning = true; updateLobes(); positionLinks(); })
+    .onEngineTick(() => { engineRunning = true; positionLinks(); })
     .onEngineStop(() => {
       engineRunning = false;
       positionLinks();
@@ -209,6 +218,8 @@ export function createGraphView(container) {
 
   let lastClick = { id: null, t: 0 };
   function onNodeClick(n) {
+    if (n.kind === "lobe") { focusFolder(n.name); return; }
+    if (n.kind === "folder") { focusFolder(n.path); return; }
     const t = performance.now();
     if (lastClick.id === n.id && t - lastClick.t < 400) {
       lastClick = { id: null, t: 0 };
@@ -219,28 +230,31 @@ export function createGraphView(container) {
     app.select(n.id, { source: "graph" });
   }
 
-  // forces: keep each lobe together, weak pull across lobes
+  // forces: each lobe gathers around its centre (anchors are pinned there),
+  // the tree pulls notes to their folder, wikilinks across lobes pull weakly
+  let centers = new Map();
   function lobeForce(strength) {
-    let nodes = [];
+    let ns = [];
     const f = alpha => {
-      for (const n of nodes) {
-        const c = centers.get(n.lobe) || [0, 0, 0];
+      for (const n of ns) {
+        if (n.kind === "lobe") continue;
+        const c = centers.get(n.lobe ?? "") || [0, 0, 0];
         n.vx += (c[0] - n.x) * strength * alpha;
         n.vy += (c[1] - n.y) * strength * alpha;
         if (state.flat) n.vz -= n.z * 0.2; // not scaled by alpha: keeps pulling until flat
         else n.vz += (c[2] - n.z) * strength * alpha;
       }
     };
-    f.initialize = ns => { nodes = ns; };
+    f.initialize = x => { ns = x; };
     return f;
   }
-  const crossLobe = l => app.items.get(idOf(l.source))?.lobe !== app.items.get(idOf(l.target))?.lobe;
+  const lobeKey = n => (n.kind === "lobe" ? n.name : n.kind === "folder" ? lobeOf(`${n.path}/x`) : lobeOf(n.path) ?? "");
   Graph.d3Force("center", null);
-  Graph.d3Force("charge").strength(-42).distanceMax(170);
+  Graph.d3Force("charge").strength(n => (n.kind === "lobe" ? -120 : n.kind === "folder" ? -70 : -40)).distanceMax(170);
   Graph.d3Force("link")
-    .distance(l => (l.kind === "explicit" ? 22 : 38))
-    .strength(l => (l.kind === "explicit" ? (crossLobe(l) ? 0.03 : 0.35) : crossLobe(l) ? 0.005 : 0.05));
-  Graph.d3Force("lobe", lobeForce(0.14));
+    .distance(l => (l.kind === "tree" ? (nodeOf(l.target)?.kind === "lobe" ? 30 : 16) : 24))
+    .strength(l => (l.kind === "tree" ? 0.5 : lobeKey(nodeOf(l.source)) === lobeKey(nodeOf(l.target)) ? 0.25 : 0.008));
+  Graph.d3Force("lobe", lobeForce(0.1));
 
   // ---------------------------------------------------------------- render on demand
   // 3d-force-graph redraws every frame forever. Once the layout has settled
@@ -274,8 +288,8 @@ export function createGraphView(container) {
   const reheat = Graph.d3ReheatSimulation.bind(Graph);
   Graph.d3ReheatSimulation = () => { engineRunning = true; wake(); return reheat(); };
 
-  // GPU driver crashes (e.g. Mesa/Zink "device lost") kill the WebGL context.
-  // Keep the rest of the app working and say what happened instead of hanging.
+  // GPU driver crashes (e.g. "device lost") kill the WebGL context. Keep the
+  // rest of the app working and say what happened instead of hanging.
   const canvas = Graph.renderer().domElement;
   const lost = document.createElement("div");
   lost.className = "empty-state graph-lost";
@@ -294,60 +308,20 @@ export function createGraphView(container) {
   });
   canvas.addEventListener("webglcontextrestored", () => { lost.hidden = true; wake(); });
 
-  const scene = Graph.scene();
-  scene.add(batches.explicit, batches.similar);
-
-  // ---------------------------------------------------------------- lobe labels
-  let lobeFx = [];
-  function buildLobes() {
-    for (const fx of lobeFx) scene.remove(fx.label);
-    lobeFx = [...app.lobes, app.lobe.get(UNSORTED.id)].filter(Boolean).map(l => {
-      const label = new SpriteText(l.name, 7, l.color);
-      label.fontFace = cssVar("--font") || "system-ui, sans-serif";
-      label.fontWeight = "600";
-      label.material.depthTest = false;
-      label.material.depthWrite = false;
-      label.material.transparent = true;
-      label.renderOrder = 5;
-      scene.add(label);
-      return { lobe: l, label, center: new THREE.Vector3(), radius: 30 };
-    });
-  }
-
-  // Lobe name sits just above the bulk of its cluster: the 75th-percentile
-  // distance, so one stray note doesn't push the label over another lobe.
-  const pct = (arr, p) => { const a = [...arr].sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.floor(p * a.length))] : 0; };
-  function updateLobes() {
-    const byLobe = new Map();
-    for (const n of app.items.values()) {
-      if (!state.types.has(n.type)) continue;
-      if (!byLobe.has(n.lobe)) byLobe.set(n.lobe, []);
-      byLobe.get(n.lobe).push(n);
-    }
-    for (const fx of lobeFx) {
-      const members = byLobe.get(fx.lobe.id) || [];
-      fx.label.visible = members.length > 0;
-      if (!members.length) continue;
-      let cx = 0, cy = 0, cz = 0;
-      for (const n of members) { cx += n.x; cy += n.y; cz += n.z; }
-      const c = fx.center.set(cx / members.length, cy / members.length, cz / members.length);
-      const d = members.map(n => Math.hypot(n.x - c.x, n.y - c.y, n.z - c.z));
-      fx.radius = Math.max(...d) + 12;
-      fx.label.position.set(c.x, c.y + pct(d, 0.75) + 9, c.z);
-    }
-  }
+  Graph.scene().add(batches.wiki, batches.tree);
 
   // Frame the whole graph once the first layout settles (unless the user has
   // already moved the camera), so any vault size starts fully in view.
+  const pct = (arr, p) => { const a = [...arr].sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.floor(p * a.length))] : 0; };
   let fitted = false;
   let userMoved = false;
   function fitAll(ms = 600) {
-    const nodes = [...app.items.values()].filter(n => state.types.has(n.type) && n.x !== undefined);
-    if (!nodes.length) return;
+    const ns = nodes.filter(n => n.x !== undefined);
+    if (!ns.length) return;
     const c = new THREE.Vector3();
-    for (const n of nodes) c.add(new THREE.Vector3(n.x, n.y, n.z));
-    c.divideScalar(nodes.length);
-    const r = pct(nodes.map(n => c.distanceTo(new THREE.Vector3(n.x, n.y, n.z))), 0.95) + 25;
+    for (const n of ns) c.add(new THREE.Vector3(n.x, n.y, n.z));
+    c.divideScalar(ns.length);
+    const r = pct(ns.map(n => c.distanceTo(new THREE.Vector3(n.x, n.y, n.z))), 0.95) + 25;
     const cam = Graph.camera();
     const aspect = el.clientWidth / Math.max(1, el.clientHeight);
     const half = THREE.MathUtils.degToRad(cam.fov / 2);
@@ -357,29 +331,76 @@ export function createGraphView(container) {
   }
 
   // ---------------------------------------------------------------- data
-  let graphLinks = [];
   let lastShape = "";
-  // What the layout depends on. Saving a note's text changes none of it, so the
-  // graph shouldn't be rebuilt (and re-laid-out) on every autosave.
+  // What the layout depends on. Saving a note's text changes none of it, so
+  // the graph isn't rebuilt (and re-laid-out) on every autosave.
   const shapeOf = () => JSON.stringify([
-    [...app.items.values()].map(n => [n.id, n.type, n.lobe, n.degree]),
-    app.links.map(l => [l.source, l.target, l.kind]),
-    app.lobes.map(l => [l.id, l.name, l.color]),
+    notes().map(n => [n.id, n.degree]),
+    app.links.map(l => [l.source, l.target]),
+    app.colors,
   ]);
 
   function setData() {
     const shape = shapeOf();
     if (shape === lastShape) {
-      // same structure: refresh labels in place, keep the layout still
       for (const n of app.items.values()) if (n.__v?.label && n.__v.label.text !== n.title) n.__v.label.text = n.title;
       refocus();
       return;
     }
     lastShape = shape;
-    const counts = new Map();
-    for (const n of app.items.values()) counts.set(n.lobe, (counts.get(n.lobe) || 0) + 1);
-    centers = lobeCenters(app.lobes, counts);
-    for (const n of app.items.values()) {
+    const ns = notes();
+    const ids = new Set(ns.map(n => n.id));
+
+    // hubs for every subfolder that holds notes (at any depth), anchors for lobes
+    const wantHubs = new Map(), wantLobes = new Map();
+    const tree = [];
+    const member = (map, key, make, id) => {
+      if (!map.has(key)) map.set(key, make());
+      map.get(key).add(id);
+    };
+    for (const n of ns) {
+      let f = folderOf(n.path);
+      if (!f) continue;
+      const parentOf = f2 => (depth(f2) >= 2 ? `folder:${f2}` : `lobe:${f2}`);
+      tree.push({ source: n.id, target: parentOf(f), kind: "tree" });
+      for (; f; f = folderOf(f)) {
+        if (depth(f) >= 2) member(wantHubs, f, () => new Set(), n.id);
+        else member(wantLobes, f, () => new Set(), n.id);
+      }
+    }
+    for (const [path, members] of wantHubs) {
+      const key = `folder:${path}`;
+      const p = folderOf(path);
+      tree.push({ source: key, target: depth(p) >= 2 ? `folder:${p}` : `lobe:${p}`, kind: "tree" });
+      const h = hubs.get(key) || { id: key, kind: "folder", path, name: path.split("/").pop() };
+      h.members = members;
+      h.lobe = lobeOf(`${path}/x`);
+      hubs.set(key, h);
+    }
+    for (const k of [...hubs.keys()]) if (!wantHubs.has(k.slice(7))) hubs.delete(k);
+    for (const [name, members] of wantLobes) {
+      const key = `lobe:${name}`;
+      const a = anchors.get(key) || { id: key, kind: "lobe", name };
+      a.members = members;
+      anchors.set(key, a);
+    }
+    for (const k of [...anchors.keys()]) if (!wantLobes.has(k.slice(5))) anchors.delete(k);
+
+    // lobe centres: biggest lobe in the middle; anchors are pinned there
+    const counts = new Map([...wantLobes].map(([k, v]) => [k, v.size]));
+    counts.set("", ns.filter(n => !lobeOf(n.path)).length);
+    centers = lobeCenters([...wantLobes.keys(), ""], counts);
+    for (const a of anchors.values()) {
+      const c = centers.get(a.name);
+      [a.fx, a.fy, a.fz] = [c[0], c[1], state.flat ? 0 : c[2]];
+      if (a.__v) a.__v.label.color = colorOf(a); // colours may have been picked
+    }
+    for (const n of [...ns, ...hubs.values()]) {
+      n.lobe = lobeKey(n);
+      if (n.__v) {
+        n.__v.mesh.material.color.set(colorOf(n));
+        if (n.kind === "folder" && n.__v.label) n.__v.label.color = colorOf(n);
+      }
       if (n.x !== undefined) continue;
       // new node: start near its lobe so the layout settles fast
       const c = centers.get(n.lobe) || [0, 0, 0];
@@ -387,11 +408,14 @@ export function createGraphView(container) {
       n.y = c[1] + (Math.random() - 0.5) * 30;
       n.z = state.flat ? 0 : c[2] + (Math.random() - 0.5) * 30;
     }
-    graphLinks = app.links.map(l => ({ ...l }));
-    buildLobes();
+    nodes = [...ns, ...hubs.values(), ...anchors.values()];
+    graphLinks = [
+      ...app.links.filter(l => ids.has(l.source) && ids.has(l.target)).map(l => ({ source: l.source, target: l.target, kind: "wiki" })),
+      ...tree,
+    ];
     engineRunning = true;
     wake();
-    Graph.graphData({ nodes: [...app.items.values()], links: graphLinks });
+    Graph.graphData({ nodes, links: graphLinks });
     rebuildLinks();
     refocus();
   }
@@ -402,7 +426,7 @@ export function createGraphView(container) {
       if (n) { state.focus.node = n; state.levels = bfsLevels([n.id]); } else state.focus = null;
     } else if (state.focus?.kind === "set") {
       state.focus.ids = state.focus.ids.filter(id => app.items.has(id));
-      if (state.focus.ids.length) state.levels = bfsLevels(state.focus.ids, 1); else state.focus = null;
+      if (state.focus.ids.length) state.levels = setLevels(state.focus.ids); else state.focus = null;
     }
     applyFocusVisuals();
   }
@@ -415,30 +439,37 @@ export function createGraphView(container) {
       const next = [];
       for (const id of frontier)
         for (const e of app.adj.get(id) || [])
-          if (!lv.has(e.id) && (e.kind === "explicit" || state.showSimilar)) { lv.set(e.id, d); next.push(e.id); }
+          if (!lv.has(e.id)) { lv.set(e.id, d); next.push(e.id); }
       frontier = next;
     }
+    return lv;
+  }
+  // a set (folder, lobe, …): its notes stay lit, their direct links half-lit
+  function setLevels(ids) {
+    const lv = bfsLevels(ids, 1);
+    for (const id of ids) lv.set(id, 1);
+    for (const [id, d] of lv) if (d === 1 && !ids.includes(id)) lv.set(id, 2);
     return lv;
   }
 
   const bar = container.querySelector(".graph-focus");
   function applyFocusVisuals() {
     wake(600);
-    for (const n of app.items.values()) {
+    for (const n of nodes) {
       const v = n.__v;
       if (!v) continue;
-      const lv = level(n);
-      v.mesh.material.opacity = [1, 1, 0.3, 0.08][lv];
-      // blending + depth sorting only for faded nodes (cheaper with big vaults)
-      const faded = lv >= 2;
-      if (v.mesh.material.transparent !== faded) { v.mesh.material.transparent = faded; v.mesh.material.needsUpdate = true; }
-      v.mesh.material.depthWrite = lv < 2;
+      const lv = levelOf(n);
+      if (v.mesh) {
+        v.mesh.material.opacity = [1, 1, 0.3, 0.08][lv];
+        const faded = lv >= 2;
+        if (v.mesh.material.transparent !== faded) { v.mesh.material.transparent = faded; v.mesh.material.needsUpdate = true; }
+        v.mesh.material.depthWrite = lv < 2;
+      }
     }
     colorLinks();
-    // move the single outline onto the focused node
     outline.removeFromParent();
     const fv = state.focus?.kind === "node" ? state.focus.node.__v : null;
-    if (fv) {
+    if (fv?.mesh) {
       outline.geometry = fv.mesh.geometry;
       outline.material.color.set(theme.accent);
       fv.group.add(outline);
@@ -447,9 +478,8 @@ export function createGraphView(container) {
     if (state.focus) {
       const f = state.focus;
       bar.querySelector(".graph-focus-label").innerHTML = f.kind === "node"
-        ? `${typeIcon(f.node.type, app.lobeOf(f.node).color, 12)}<b>${esc(f.node.title)}</b>`
-        : f.kind === "set" ? `<b>${esc(f.label || `${f.ids.length} items`)}</b>`
-        : `<span class="dot" style="background:${f.lobe.color}"></span><b>${esc(f.lobe.name)}</b>`;
+        ? `<span class="dot" style="background:${app.colorOf(f.node)}"></span><b>${esc(f.node.title)}</b>`
+        : `${f.color ? `<span class="dot" style="background:${f.color}"></span>` : ""}<b>${esc(f.label || `${f.ids.length} notes`)}</b>`;
     }
   }
 
@@ -462,7 +492,7 @@ export function createGraphView(container) {
   }
 
   function focusNode(n, { fly = true } = {}) {
-    if (!n) return;
+    if (!n || n.type !== "note") return;
     state.focus = { kind: "node", node: n };
     state.levels = bfsLevels([n.id]);
     applyFocusVisuals();
@@ -470,44 +500,26 @@ export function createGraphView(container) {
     if (fly) flyTo(n);
   }
 
-  function focusLobe(lobe) {
-    const fx = lobeFx.find(f => f.lobe.id === lobe.id);
-    const ids = [...app.items.values()].filter(n => n.lobe === lobe.id).map(n => n.id);
-    if (!fx || !ids.length) return;
-    const lv = bfsLevels(ids, 1);
-    for (const id of ids) lv.set(id, 1);
-    state.focus = { kind: "lobe", lobe };
-    state.levels = lv;
+  // Light up a set of notes and fly so all of it is in view.
+  function focusSet(ids, label, color) {
+    ids = ids.filter(id => app.items.get(id)?.type === "note");
+    if (!ids.length) return;
+    state.focus = { kind: "set", ids, label, color };
+    state.levels = setLevels(ids);
     applyFocusVisuals();
     pauseOrbit();
-    const ms = reduceMotion() ? 0 : 800;
-    if (state.flat) {
-      const c = fx.center.clone().setZ(0);
-      Graph.cameraPosition(c.clone().setZ(fx.radius * 3.2), c, ms);
-      return;
-    }
-    const out = fx.center.clone().normalize();
-    if (out.lengthSq() === 0) out.set(0, 0, 1);
-    const pos = fx.center.clone().add(out.multiplyScalar(fx.radius * 3.2)).add(new THREE.Vector3(0, 20, 0));
-    Graph.cameraPosition(pos, fx.center.clone(), ms);
+    const ns = ids.map(id => app.items.get(id));
+    const c = new THREE.Vector3();
+    for (const n of ns) c.add(new THREE.Vector3(n.x, n.y, n.z));
+    c.divideScalar(ns.length);
+    const r = Math.max(...ns.map(n => c.distanceTo(new THREE.Vector3(n.x, n.y, n.z))));
+    flyTo({ x: c.x, y: c.y, z: c.z }, 800, Math.max(110, r * 3));
   }
 
-  // Light up a set of items (e.g. the notes an Ask answer cites) + their neighbours.
-  function highlight(ids, label = "") {
-    ids = ids.filter(id => app.items.has(id));
-    if (!ids.length) return;
-    const lv = bfsLevels(ids, 1);
-    state.focus = { kind: "set", ids, label };
-    state.levels = lv;
-    applyFocusVisuals();
-    pauseOrbit();
-    // fly to the centre of the set, far enough to see all of it
-    const nodes = ids.map(id => app.items.get(id));
-    const c = new THREE.Vector3();
-    for (const n of nodes) c.add(new THREE.Vector3(n.x, n.y, n.z));
-    c.divideScalar(nodes.length);
-    const r = Math.max(...nodes.map(n => c.distanceTo(new THREE.Vector3(n.x, n.y, n.z))));
-    flyTo({ x: c.x, y: c.y, z: c.z }, 700, Math.max(110, r * 3));
+  // A folder or lobe: everything inside it.
+  function focusFolder(path) {
+    const ids = notes().filter(n => n.path.startsWith(`${path}/`)).map(n => n.id);
+    focusSet(ids, path.split("/").pop(), app.scheme.folder(path));
   }
 
   function clearFocus() {
@@ -535,6 +547,7 @@ export function createGraphView(container) {
   el.addEventListener("wheel", () => { userMoved = true; pauseOrbit(); resumeOrbitSoon(); }, { passive: true });
 
   // ---------------------------------------------------------------- per frame: semantic zoom
+  // Far away: lobe names. Middle: lobe and folder names. Close: note names.
   const tmp = new THREE.Vector3();
   let raf;
   function frame() {
@@ -542,22 +555,22 @@ export function createGraphView(container) {
     if (!container.offsetParent || paused) return; // tab hidden or graph idle
     const cam = Graph.camera();
     const camDist = cam.position.distanceTo(controls.target);
-    const far = camDist > 360; // far away = lobe names only
-    const near = camDist < 200; // close up = node labels only
-    for (const n of app.items.values()) {
+    const far = camDist > 380;
+    for (const n of nodes) {
       const v = n.__v;
       if (!v) continue;
+      if (n.kind === "lobe") {
+        const lit = levelOf(n) <= 1;
+        v.label.material.opacity = state.focus ? (lit ? 1 : 0.12) : far ? 1 : 0.8;
+        continue;
+      }
       let show;
-      if (state.focus) show = level(n) <= (state.focus.kind === "node" ? 1 : state.focus.kind === "set" ? 0 : far ? -1 : 1);
+      if (n.kind === "folder") show = state.focus ? levelOf(n) <= 1 : !far;
+      else if (state.focus) show = level(n) <= 1;
       else show = !far && tmp.set(n.x, n.y, n.z).distanceTo(cam.position) < 160;
       if (n === state.hover) show = true;
-      show = show && state.types.has(n.type);
       if (show) ensureLabel(n).visible = true;
       else if (v.label) v.label.visible = false;
-    }
-    for (const fx of lobeFx) {
-      const focused = state.focus?.kind === "lobe" && state.focus.lobe.id === fx.lobe.id;
-      fx.label.material.opacity = focused ? 1 : state.focus ? 0.12 : far ? 1 : near ? 0 : 0.45;
     }
   }
   raf = requestAnimationFrame(frame);
@@ -572,7 +585,7 @@ export function createGraphView(container) {
     controls.touches.ONE = state.flat ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE;
     container.querySelector("[data-hint-drag]").textContent = state.flat ? "drag to pan" : "drag to rotate";
     for (const b of container.querySelectorAll("[data-mode]")) b.classList.toggle("on", (b.dataset.mode === "2d") === state.flat);
-    container.querySelector('[data-opt="similar"]').checked = state.showSimilar;
+    container.querySelector('[data-opt="tree"]').checked = state.showTree;
     orbitBox.checked = state.orbit;
     orbitBox.disabled = state.flat;
     container.querySelector("[data-orbit]").classList.toggle("disabled", state.flat);
@@ -584,10 +597,11 @@ export function createGraphView(container) {
     state.flat = flat;
     prefs.set("graph.view", flat ? "2d" : "3d");
     const instant = reduceMotion();
-    for (const n of app.items.values()) {
+    for (const a of anchors.values()) a.fz = flat ? 0 : centers.get(a.name)?.[2] ?? 0;
+    for (const n of nodes) {
       if (flat && instant) { n.z = 0; n.vz = 0; }
       // un-flattening: a little z jitter so charge can push nodes apart in depth again
-      if (!flat) n.z += (Math.random() - 0.5) * 20;
+      if (!flat && !n.kind) n.z += (Math.random() - 0.5) * 20;
     }
     Graph.d3ReheatSimulation();
     pauseOrbit();
@@ -613,7 +627,12 @@ export function createGraphView(container) {
   });
   container.querySelector(".graph-bar").addEventListener("change", e => {
     const opt = e.target.dataset.opt;
-    if (opt === "similar") api.setShowSimilar(e.target.checked);
+    if (opt === "tree") {
+      state.showTree = e.target.checked;
+      prefs.set("graph.tree", state.showTree);
+      rebuildLinks();
+      wake();
+    }
     if (opt === "orbit") {
       state.orbit = e.target.checked;
       prefs.set("graph.orbit", state.orbit);
@@ -631,15 +650,11 @@ export function createGraphView(container) {
   function applyTheme() {
     readTheme();
     Graph.backgroundColor(theme.bg);
-    const unsorted = app.lobe.get(UNSORTED.id);
-    if (unsorted) unsorted.color = cssVar("--unsorted");
-    for (const n of app.items.values()) {
+    for (const n of nodes) {
       if (!n.__v) continue;
-      if (n.__v.label) n.__v.label.color = theme.label;
-      n.__v.mesh.material.color.set(app.lobeOf(n).color);
+      if (n.__v.label && !n.kind) n.__v.label.color = theme.label;
+      if (n.__v.mesh) n.__v.mesh.material.color.set(colorOf(n));
     }
-    buildLobes();
-    updateLobes();
     applyFocusVisuals();
   }
 
@@ -649,31 +664,20 @@ export function createGraphView(container) {
     state,
     setData,
     focusNode,
-    focusLobe,
-    highlight,
+    focusFolder,
+    focusSet,
     clearFocus,
     setViewMode,
     toggleView: () => setViewMode(!state.flat),
     fitAll,
     applyTheme,
-    setTypes(types) {
-      state.types = new Set(types);
-      prefs.set("graph.types", [...state.types]);
-      prefs.set("graph.types.known", TYPES.map(t => t.id));
-      if (state.focus?.kind === "node" && !state.types.has(state.focus.node.type)) clearFocus();
-      Graph.nodeVisibility(n => state.types.has(n.type));
-      rebuildLinks();
-      updateLobes();
-      app.emit("graph-filters");
-    },
-    setShowSimilar(on) {
-      state.showSimilar = on;
-      prefs.set("graph.similar", on);
-      rebuildLinks();
-      if (state.focus?.kind === "node") state.levels = bfsLevels([state.focus.node.id]);
-      applyFocusVisuals();
-      syncToolbar();
-      app.emit("graph-filters");
+    // for tests and devtools: the structure the graph built from folders
+    get structure() {
+      return {
+        lobes: [...anchors.values()].map(a => ({ name: a.name, color: colorOf(a), notes: a.members.size })),
+        folders: [...hubs.values()].map(h => ({ path: h.path, color: colorOf(h), notes: h.members.size })),
+        tree: graphLinks.filter(l => l.kind === "tree").map(l => [idOf(l.source), idOf(l.target)]),
+      };
     },
     // Screen position (viewport px) of a node, for the travel animation.
     screenPos(n) {
@@ -689,4 +693,3 @@ export function createGraphView(container) {
   Graph.cameraPosition(state.flat ? { x: 0, y: 0, z: 560 } : { x: 0, y: 60, z: 560 }, { x: 0, y: 0, z: 0 });
   return api;
 }
-

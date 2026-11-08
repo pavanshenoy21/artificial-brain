@@ -17,7 +17,6 @@ use crate::markdown as md;
 use crate::vault::Item;
 
 pub const EXT: &str = "canvas";
-pub const DIR: &str = "canvases";
 
 pub fn is_canvas(path: &std::path::Path) -> bool {
     path.extension().is_some_and(|e| e.eq_ignore_ascii_case(EXT))
@@ -41,14 +40,11 @@ pub fn parse_item(text: &str, rel: &str, stem: &str) -> Item {
     Item {
         id: rel.to_string(),
         kind: "canvas".into(),
-        lobe: None,
         title: stem.to_string(),
         tags: vec![],
         inline_tags: md::inline_tags(&body),
         body,
         path: rel.to_string(),
-        created: None,
-        updated: None,
         fields,
     }
 }

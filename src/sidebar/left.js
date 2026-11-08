@@ -1,154 +1,295 @@
-// Left sidebar: Files (folders or types), Tags, Inbox, Tasks, Filters (types, lobes, similar).
+// Left sidebar: the file explorer (like Obsidian's) and Tags.
 
 import { app } from "../state.js";
 import { allTags } from "../lib/tags.js";
 import { left } from "../shell/layout.js";
-import { icon, typeIcon } from "../icons.js";
-import { TYPES } from "../lib/types.js";
-import { UNSORTED } from "../lib/lobes.js";
-import { itemMenu } from "../ai/actions.js";
+import { icon, itemIcon } from "../icons.js";
 import { esc, setHtml } from "../util.js";
 import { prefs } from "../lib/prefs.js";
-import { api } from "../api.js";
+import { openMenu } from "../shell/menu.js";
 import { tabsApi } from "../shell/tabs.js";
-import { toast } from "../shell/toast.js";
-import { openTasks, parseTasks, toggleTask, dueBucket, today } from "../lib/tasks.js";
+import { folderOf } from "../lib/folders.js";
+import { fileMenu, folderMenu } from "./menus.js";
+import { newNote, newFolder, newCanvas, renameItem, renameFolder, moveItem, deleteItem, deleteFolder, wikilinkTo } from "../actions.js";
 
-// Links being fetched / that failed show it in the list.
-const linkState = n =>
-  n.type !== "link" || !n.status || n.status === "ok" ? ""
-    : n.status === "pending" ? `<span class="row-state">fetching</span>`
-    : `<span class="row-state failed" title="${esc(n.error || "")}">failed</span>`;
+const nameOf = p => p.split("/").pop();
+const natural = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+const SORTS = {
+  "name-asc": { label: "File name (A to Z)", cmp: (a, b) => natural(a.title, b.title) },
+  "name-desc": { label: "File name (Z to A)", cmp: (a, b) => natural(b.title, a.title) },
+};
 
 export function initLeftSidebar({ graph }) {
-  // ---------------------------------------------------------------- files
-  // Two ways to browse: the vault's real folders (like Obsidian) or by item type.
+  // ---------------------------------------------------------------- file explorer
   const files = left.add({ id: "files", title: "Files", iconName: "files" });
-  files.innerHTML = `<div class="side-head files-head">
-      <input class="side-filter" placeholder="Filter" spellcheck="false" />
-      <div class="seg" role="group" aria-label="Group files by">
-        <button type="button" data-mode="folders" title="Folders on disk">Folders</button><button type="button" data-mode="types" title="Group by item type">Types</button>
-      </div>
-    </div><div class="tree" role="tree"></div>`;
+  files.innerHTML = `<div class="nav-buttons">
+      <button type="button" class="icon-btn" data-act="new-note" title="New note">${icon("new-note")}</button>
+      <button type="button" class="icon-btn" data-act="new-folder" title="New folder">${icon("folder-plus")}</button>
+      <button type="button" class="icon-btn" data-act="new-canvas" title="New canvas">${icon("canvas")}</button>
+      <button type="button" class="icon-btn" data-act="sort" title="Change sort order">${icon("sort")}</button>
+      <button type="button" class="icon-btn" data-act="collapse" title="Collapse all">${icon("collapse-all")}</button>
+    </div><div class="tree explorer" role="tree" tabindex="-1"></div>`;
   const tree = files.querySelector(".tree");
-  const filterInput = files.querySelector(".side-filter");
-  const collapsed = new Set(prefs.get("files.collapsed", []));        // type groups
-  const openFolders = new Set(prefs.get("files.openFolders", []));    // folder paths
-  let mode = prefs.get("files.mode", "folders");
+  const open = new Set(prefs.get("files.openFolders", []));
+  let sort = prefs.get("files.sort", "name-asc");
+  let renaming = null; // { kind: "file" | "folder", path }
+  const saveOpen = () => prefs.set("files.openFolders", [...open]);
+  const activeId = () => (tabsApi.active?.kind === "item" ? tabsApi.active.id : null);
 
-  function row(n, depth = 0) {
-    return `<div class="row item-row ${n.id === app.selected ? "on" : ""}" data-id="${esc(n.id)}" role="treeitem" tabindex="-1" draggable="true" title="${esc(n.path || n.title)}" style="--depth:${depth}">
-      <span class="dot" style="background:${app.lobeOf(n).color}"></span><span class="row-title">${esc(n.title)}</span>${linkState(n)}</div>`;
-  }
-
-  const byTitle = (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
-
-  function typesHtml(all, q) {
-    return TYPES.map(t => {
-      const items = all.filter(n => n.type === t.id).sort(byTitle);
-      if (!items.length && q) return "";
-      const open = q || !collapsed.has(t.id);
-      return `<div class="group">
-        <button type="button" class="row group-head" data-group="${t.id}" aria-expanded="${!!open}">
-          ${icon(open ? "chevron-down" : "chevron-right", { size: 14 })}<span class="row-title">${t.name}</span><span class="count">${items.length}</span>
-        </button>
-        ${open ? items.map(n => row(n, 1)).join("") : ""}
-      </div>`;
-    }).join("");
-  }
-
-  // Nested folders from item paths; folders first, then files, by name.
-  function foldersHtml(all, q) {
-    const root = { dirs: new Map(), items: [] };
-    for (const n of all) {
-      const parts = (n.path || n.title).split("/");
-      parts.pop();
+  function build() {
+    const root = { path: "", dirs: new Map(), files: [] };
+    const dir = path => {
       let node = root;
-      let path = "";
-      for (const p of parts) {
-        path = path ? `${path}/${p}` : p;
-        if (!node.dirs.has(p)) node.dirs.set(p, { path, dirs: new Map(), items: [] });
-        node = node.dirs.get(p);
+      let cur = "";
+      for (const part of path ? path.split("/") : []) {
+        cur = cur ? `${cur}/${part}` : part;
+        if (!node.dirs.has(part)) node.dirs.set(part, { path: cur, dirs: new Map(), files: [] });
+        node = node.dirs.get(part);
       }
-      node.items.push(n);
-    }
-    const count = d => d.items.length + [...d.dirs.values()].reduce((s, x) => s + count(x), 0);
-    const render = (d, depth) =>
-      [...d.dirs.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: "base" })).map(([name, sub]) => {
-        const open = q || openFolders.has(sub.path);
-        return `<div class="group">
-          <button type="button" class="row group-head folder" data-folder="${esc(sub.path)}" aria-expanded="${!!open}" style="--depth:${depth}" title="${esc(sub.path)}">
-            ${icon(open ? "chevron-down" : "chevron-right", { size: 14 })}<span class="row-title">${esc(name)}</span><span class="count">${count(sub)}</span>
-          </button>
-          ${open ? render(sub, depth + 1) : ""}
-        </div>`;
-      }).join("") + d.items.sort(byTitle).map(n => row(n, depth)).join("");
-    return render(root, 0);
+      return node;
+    };
+    for (const f of app.folders) dir(f);
+    for (const n of app.items.values()) dir(folderOf(n.path)).files.push(n);
+    return root;
   }
 
-  function renderFiles() {
-    const q = filterInput.value.trim().toLowerCase();
-    const all = [...app.items.values()].filter(n => !q || n.title.toLowerCase().includes(q) || allTags(n).some(t => t.toLowerCase().includes(q)) || (n.path || "").toLowerCase().includes(q));
-    for (const b of files.querySelectorAll("[data-mode]")) b.classList.toggle("on", b.dataset.mode === mode);
-    setHtml(tree, (mode === "types" ? typesHtml(all, q) : foldersHtml(all, q)) || `<div class="empty-note">${q ? "No matches." : "No files yet."}</div>`);
+  const count = d => d.files.length + [...d.dirs.values()].reduce((s, x) => s + count(x), 0);
+
+  function fileRow(n, depth) {
+    const editing = renaming?.kind === "file" && renaming.path === n.id;
+    const title = editing
+      ? `<input class="rename-input" value="${esc(n.title)}" spellcheck="false" aria-label="New name" />`
+      : `<span class="row-title">${esc(n.title)}</span>${n.type === "canvas" ? `<span class="ext">canvas</span>` : ""}`;
+    return `<div class="row item-row file-row${n.id === activeId() ? " active" : ""}${n.id === app.selected ? " on" : ""}" data-id="${esc(n.id)}"
+      role="treeitem" tabindex="-1" draggable="${!editing}" title="${esc(n.path)}" style="--depth:${depth}">
+      ${itemIcon(n, app.colorOf(n))}${title}</div>`;
   }
 
-  files.querySelector(".seg").addEventListener("click", e => {
-    const b = e.target.closest("[data-mode]");
-    if (!b) return;
-    mode = b.dataset.mode;
-    prefs.set("files.mode", mode);
-    renderFiles();
-  });
+  function folderRow(d, depth) {
+    const editing = renaming?.kind === "folder" && renaming.path === d.path;
+    const isOpen = open.has(d.path);
+    const name = nameOf(d.path);
+    return `<div class="group">
+      <div class="row folder-row" data-folder="${esc(d.path)}" role="treeitem" aria-expanded="${isOpen}" tabindex="-1" draggable="${!editing}" style="--depth:${depth}" title="${esc(d.path)}">
+        ${icon(isOpen ? "chevron-down" : "chevron-right", { size: 14, cls: "chev" })}
+        <span class="dot folder-dot" style="background:${app.scheme.folder(d.path)}"></span>
+        ${editing ? `<input class="rename-input" value="${esc(name)}" spellcheck="false" aria-label="New folder name" />` : `<span class="row-title">${esc(name)}</span>`}
+        <span class="count">${count(d) || ""}</span>
+      </div>
+      ${isOpen ? render(d, depth + 1) : ""}
+    </div>`;
+  }
 
-  // drag a file onto a canvas (or into the editor, as a [[link]])
-  document.getElementById("left").addEventListener("dragstart", e => {
-    const r = e.target.closest?.(".item-row");
-    const n = r && app.items.get(r.dataset.id);
-    if (!n) return;
-    const stem = (n.path || "").split("/").pop().replace(/\.md$/, "") || n.title;
-    e.dataTransfer.setData("application/x-brain-item", n.id);
-    e.dataTransfer.setData("text/plain", `[[${stem}]]`);
-    e.dataTransfer.effectAllowed = "copy";
-  });
-  tree.addEventListener("click", e => {
-    const f = e.target.closest("[data-folder]");
-    if (f) {
-      const p = f.dataset.folder;
-      openFolders.has(p) ? openFolders.delete(p) : openFolders.add(p);
-      prefs.set("files.openFolders", [...openFolders]);
-      renderFiles();
-      return;
+  function render(d, depth) {
+    const dirs = [...d.dirs.values()].sort((a, b) => natural(nameOf(a.path), nameOf(b.path)) * (sort === "name-desc" ? -1 : 1));
+    return dirs.map(x => folderRow(x, depth)).join("") + [...d.files].sort(SORTS[sort].cmp).map(n => fileRow(n, depth)).join("");
+  }
+
+  function renderFiles(force = false) {
+    // don't redraw under an open rename box
+    if (renaming && tree.querySelector(".rename-input") && !force) return;
+    const html = render(build(), 0) || `<div class="empty-note">No files yet.</div>`;
+    setHtml(tree, html, force);
+    const input = tree.querySelector(".rename-input");
+    if (input && document.activeElement !== input) {
+      input.focus();
+      input.select();
     }
-    const g = e.target.closest("[data-group]");
-    if (g) {
-      const id = g.dataset.group;
-      collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
-      prefs.set("files.collapsed", [...collapsed]);
-      renderFiles();
-      return;
+  }
+
+  // ---- inline rename
+  function startRename(kind, path) {
+    for (let f = folderOf(path); f; f = folderOf(f)) open.add(f);
+    saveOpen();
+    left.show("files");
+    renaming = { kind, path };
+    renderFiles(true);
+  }
+  async function finishRename(keep) {
+    const r = renaming;
+    const input = tree.querySelector(".rename-input");
+    if (!r || !input) return;
+    const value = input.value.trim();
+    renaming = null;
+    if (keep && value) {
+      if (r.kind === "file") {
+        const n = app.items.get(r.path);
+        if (n && value !== n.title) await renameItem(r.path, value);
+      } else if (value !== nameOf(r.path)) {
+        const parent = folderOf(r.path);
+        await renameFolder(r.path, parent ? `${parent}/${value}` : value);
+      }
     }
-    const r = e.target.closest(".item-row");
-    if (r) app.select(r.dataset.id, { source: "list" });
-  });
-  tree.addEventListener("dblclick", e => {
-    const r = e.target.closest(".item-row");
-    if (r) app.open(r.dataset.id);
-  });
+    renderFiles(true);
+    tree.querySelector(".row.on, .row.active")?.focus();
+  }
   tree.addEventListener("keydown", e => {
-    const rows = [...tree.querySelectorAll(".item-row")];
-    const i = rows.indexOf(document.activeElement);
+    if (!e.target.classList.contains("rename-input")) return;
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finishRename(true); }
+    if (e.key === "Escape") { e.preventDefault(); finishRename(false); }
+  });
+  tree.addEventListener("focusout", e => { if (e.target.classList?.contains("rename-input")) finishRename(true); });
+
+  // ---- clicks
+  function toggle(path, to = !open.has(path)) {
+    to ? open.add(path) : open.delete(path);
+    saveOpen();
+    renderFiles();
+    tree.querySelector(`[data-folder="${CSS.escape(path)}"]`)?.focus();
+  }
+  tree.addEventListener("click", e => {
+    if (e.target.closest(".rename-input")) return;
+    const f = e.target.closest("[data-folder]");
+    if (f) { toggle(f.dataset.folder); return; }
+    const r = e.target.closest(".file-row");
+    if (r) {
+      // like Obsidian: a click opens the file
+      app.select(r.dataset.id, { source: "list" });
+      app.open(r.dataset.id);
+    }
+  });
+  tree.addEventListener("auxclick", e => {
+    const r = e.target.closest(".file-row");
+    if (e.button === 1 && r) app.open(r.dataset.id);
+  });
+  tree.addEventListener("contextmenu", e => {
+    const at = { x: e.clientX, y: e.clientY };
+    const f = e.target.closest("[data-folder]");
+    const r = e.target.closest(".file-row");
+    e.preventDefault();
+    if (f) folderMenu(f.dataset.folder, at);
+    else if (r) fileMenu(r.dataset.id, at);
+    else openMenu(at, [
+      { label: "New note", iconName: "new-note", run: () => newNote("") },
+      { label: "New folder", iconName: "folder-plus", run: () => newFolder("") },
+      { label: "New canvas", iconName: "canvas", run: () => newCanvas("") },
+    ]);
+  });
+
+  // ---- keyboard: arrows, Enter, F2, Delete
+  tree.addEventListener("keydown", e => {
+    if (e.target.classList.contains("rename-input")) return;
+    const rows = [...tree.querySelectorAll(".row")];
+    const cur = document.activeElement?.closest?.(".row");
+    const i = rows.indexOf(cur);
+    const folder = cur?.dataset.folder;
+    const id = cur?.dataset.id;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
-      next?.focus();
-      if (next) app.select(next.dataset.id, { source: "list" });
-    } else if (e.key === "Enter" && i >= 0) app.open(rows[i].dataset.id);
+      rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
+    } else if (e.key === "ArrowRight" && folder) { e.preventDefault(); if (!open.has(folder)) toggle(folder, true); }
+    else if (e.key === "ArrowLeft" && cur) {
+      e.preventDefault();
+      if (folder && open.has(folder)) toggle(folder, false);
+      else {
+        const parent = folderOf(folder || id || "");
+        if (parent) tree.querySelector(`[data-folder="${CSS.escape(parent)}"]`)?.focus();
+      }
+    } else if (e.key === "Enter" && cur) { e.preventDefault(); folder ? toggle(folder) : app.open(id); }
+    else if (e.key === "F2" && cur) { e.preventDefault(); startRename(folder ? "folder" : "file", folder || id); }
+    else if (e.key === "Delete" && cur) { e.preventDefault(); folder ? deleteFolder(folder) : deleteItem(id); }
   });
-  filterInput.addEventListener("input", renderFiles);
-  filterInput.addEventListener("keydown", e => {
-    if (e.key === "ArrowDown") { e.preventDefault(); tree.querySelector(".item-row")?.focus(); }
-    if (e.key === "Escape") { filterInput.value = ""; renderFiles(); }
+
+  // ---- drag and drop: files and folders into folders (or the root)
+  let dragging = null; // { kind, path }
+  files.addEventListener("dragstart", e => {
+    const r = e.target.closest?.(".file-row, .folder-row");
+    if (!r) return;
+    if (r.dataset.folder) {
+      dragging = { kind: "folder", path: r.dataset.folder };
+      e.dataTransfer.setData("text/plain", r.dataset.folder);
+    } else {
+      const n = app.items.get(r.dataset.id);
+      dragging = { kind: "file", path: n.id };
+      // also droppable onto a canvas, or into a note as a [[link]]
+      e.dataTransfer.setData("application/x-brain-item", n.id);
+      e.dataTransfer.setData("text/plain", wikilinkTo(n));
+    }
+    e.dataTransfer.effectAllowed = "copyMove";
+  });
+  files.addEventListener("dragend", () => { dragging = null; clearDrop(); });
+  const clearDrop = () => tree.querySelectorAll(".drop-target").forEach(x => x.classList.remove("drop-target"));
+  // where a drop would land: the folder under the pointer, a file's folder, or the root
+  function dropFolder(e) {
+    const f = e.target.closest?.("[data-folder]");
+    if (f) return f.dataset.folder;
+    const r = e.target.closest?.(".file-row");
+    return r ? folderOf(r.dataset.id) : "";
+  }
+  const canDrop = target => dragging && !(dragging.kind === "folder" && (target === dragging.path || target.startsWith(`${dragging.path}/`)));
+  tree.addEventListener("dragover", e => {
+    if (!dragging) return;
+    const target = dropFolder(e);
+    if (!canDrop(target)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    clearDrop();
+    (target ? tree.querySelector(`[data-folder="${CSS.escape(target)}"]`) : tree)?.classList.add("drop-target");
+  });
+  tree.addEventListener("dragleave", e => { if (!tree.contains(e.relatedTarget)) clearDrop(); });
+  tree.addEventListener("drop", async e => {
+    if (!dragging) return;
+    const target = dropFolder(e);
+    const ok = canDrop(target);
+    const d = dragging;
+    dragging = null;
+    clearDrop();
+    if (!ok) return;
+    e.preventDefault();
+    if (d.kind === "file") {
+      if (folderOf(d.path) !== target) await moveItem(d.path, target);
+    } else if (folderOf(d.path) !== target) {
+      await renameFolder(d.path, target ? `${target}/${nameOf(d.path)}` : nameOf(d.path));
+    }
+    if (target) { open.add(target); saveOpen(); renderFiles(); }
+  });
+
+  // ---- header buttons
+  // new things go into the last folder used here (or that file's folder), else the root
+  let lastRow = null;
+  tree.addEventListener("focusin", e => {
+    const r = e.target.closest?.(".row");
+    if (r) lastRow = r.dataset.folder !== undefined ? { folder: r.dataset.folder } : { folder: folderOf(r.dataset.id || "") };
+  });
+  files.querySelector(".nav-buttons").addEventListener("click", e => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    const here = lastRow && (!lastRow.folder || app.folders.includes(lastRow.folder)) ? lastRow.folder : "";
+    if (act === "new-note") newNote(here);
+    else if (act === "new-folder") newFolder(here);
+    else if (act === "new-canvas") newCanvas(here);
+    else if (act === "collapse") { open.clear(); saveOpen(); renderFiles(); }
+    else if (act === "sort") {
+      const r = e.target.closest("[data-act]").getBoundingClientRect();
+      openMenu({ x: r.left, y: r.bottom + 4 }, Object.entries(SORTS).map(([k, s]) => ({
+        label: s.label, iconName: k === sort ? "check" : undefined,
+        run: () => { sort = k; prefs.set("files.sort", k); renderFiles(); },
+      })));
+    }
+  });
+
+  // ---- events from elsewhere
+  app.on("rename-folder", path => startRename("folder", path));
+  app.on("rename-file", id => startRename("file", id));
+  app.on("folder-moved", ({ from, to }) => {
+    for (const p of [...open]) if (p === from || p.startsWith(`${from}/`)) { open.delete(p); open.add(to + p.slice(from.length)); }
+    saveOpen();
+  });
+  app.on("reveal", id => {
+    for (let f = folderOf(id); f; f = folderOf(f)) open.add(f);
+    saveOpen();
+    left.show("files");
+    renderFiles(true);
+    const row = tree.querySelector(`.file-row[data-id="${CSS.escape(id)}"]`);
+    row?.scrollIntoView({ block: "nearest" });
+    row?.focus();
+  });
+  app.on("tab", () => renderFiles());
+  // a new file shows up in the explorer, inside its (now open) folder
+  app.on("created", id => {
+    for (let f = folderOf(id); f; f = folderOf(f)) open.add(f);
+    saveOpen();
+    renderFiles();
   });
 
   // ---------------------------------------------------------------- tags
@@ -160,164 +301,42 @@ export function initLeftSidebar({ graph }) {
       if (!byTag.has(t)) byTag.set(t, []);
       byTag.get(t).push(n);
     }
-    const sorted = [...byTag].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
-    setHtml(tagsPane, `<div class="tree">
-      ${sorted.map(([t, items]) => tagGroup(t, `#${t}`, items)).join("")}
-      ${!sorted.length ? `<div class="empty-note">No tags yet.</div>` : ""}
-    </div>`);
-  }
-  function tagGroup(key, label, items, count = items.length) {
-    const open = openTags.has(key);
-    return `<div class="group">
-      <button type="button" class="row group-head" data-tag="${esc(key)}" aria-expanded="${open}">
-        ${icon(open ? "chevron-down" : "chevron-right", { size: 14 })}<span class="row-title">${esc(label)}</span><span class="count">${count}</span>
-      </button>
-      ${open ? items.sort((a, b) => a.title.localeCompare(b.title)).map(n => row(n, 1)).join("") : ""}
-    </div>`;
+    const tags = [...byTag.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+    setHtml(tagsPane, `<div class="side-label">Tags<span class="count">${tags.length}</span></div>
+      <div class="tree">${tags.map(([t, items]) => {
+        const isOpen = openTags.has(t);
+        return `<div class="group">
+          <div class="row folder-row" data-tag="${esc(t)}" aria-expanded="${isOpen}" tabindex="-1">
+            ${icon(isOpen ? "chevron-down" : "chevron-right", { size: 14, cls: "chev" })}<span class="row-title">#${esc(t)}</span><span class="count">${items.length}</span>
+          </div>
+          ${isOpen ? items.sort((a, b) => natural(a.title, b.title)).map(n => fileRow(n, 1)).join("") : ""}
+        </div>`;
+      }).join("") || `<div class="empty-note">No tags yet. Write #tag in a note.</div>`}</div>`);
   }
   tagsPane.addEventListener("click", e => {
     const g = e.target.closest("[data-tag]");
     if (g) {
-      const k = g.dataset.tag;
-      openTags.has(k) ? openTags.delete(k) : openTags.add(k);
+      const t = g.dataset.tag;
+      openTags.has(t) ? openTags.delete(t) : openTags.add(t);
       renderTags();
       return;
     }
-    const r = e.target.closest(".item-row");
-    if (r) app.select(r.dataset.id, { source: "list" });
+    const r = e.target.closest(".file-row");
+    if (r) { app.select(r.dataset.id, { source: "list" }); app.open(r.dataset.id); }
   });
-  tagsPane.addEventListener("dblclick", e => {
-    const r = e.target.closest(".item-row");
-    if (r) app.open(r.dataset.id);
-  });
-
-  // ---------------------------------------------------------------- inbox
-  // Untagged items wait here until they get a tag.
-  const inbox = left.add({ id: "inbox", title: "Inbox (untagged)", iconName: "inbox" });
-  function renderInbox() {
-    const items = [...app.items.values()].filter(n => n.type !== "canvas" && !allTags(n).length).sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")) || a.title.localeCompare(b.title));
-    setHtml(inbox, `<div class="side-label">Inbox<span class="count">${items.length}</span></div>
-      <div class="tree">${items.map(n => row(n)).join("") || `<div class="empty-note">Nothing untagged.</div>`}</div>`);
-    left.badge("inbox", items.length);
-  }
-  inbox.addEventListener("click", e => {
-    const r = e.target.closest(".item-row");
-    if (r) app.select(r.dataset.id, { source: "list" });
-  });
-  inbox.addEventListener("dblclick", e => {
-    const r = e.target.closest(".item-row");
-    if (r) app.open(r.dataset.id);
-  });
-
-  // ---------------------------------------------------------------- tasks
-  // Every open "- [ ]" in the vault, by due date. Ticking one writes the note.
-  const tasksPane = left.add({ id: "tasks", title: "Tasks", iconName: "tasks" });
-  const BUCKETS = [["overdue", "Overdue"], ["today", "Today"], ["soon", "Next 7 days"], ["later", "Later"], ["none", "No date"]];
-  const dayLabel = d => {
-    const [y, m, dd] = d.split("-").map(Number);
-    return new Date(y, m - 1, dd).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  };
-  function renderTasks() {
-    const now = today();
-    const all = openTasks(app.items.values());
-    const by = new Map(BUCKETS.map(([k]) => [k, []]));
-    for (const t of all) by.get(dueBucket(t.due, now)).push(t);
-    const rowHtml = t => {
-      const n = app.items.get(t.id);
-      return `<div class="row task-row" data-id="${esc(t.id)}" data-line="${t.line}" title="${esc(n.title)}">
-        <input type="checkbox" class="task-check" aria-label="Done: ${esc(t.text)}" />
-        <span class="task-main"><span class="task-text">${esc(t.text || "(no text)")}</span>
-        <span class="task-meta"><span class="dot" style="background:${app.lobeOf(n).color}"></span>${esc(n.title)}${t.due ? ` · <span class="due-${dueBucket(t.due, now)}">${t.due === now ? "today" : dayLabel(t.due)}</span>` : ""}</span></span></div>`;
-    };
-    setHtml(tasksPane, `<div class="side-label">Tasks<span class="count">${all.length}</span></div>
-      ${all.length ? BUCKETS.filter(([k]) => by.get(k).length).map(([k, label]) => `
-        <div class="task-group"><div class="task-group-label ${k === "overdue" ? "due-overdue" : ""}">${label}<span class="count">${by.get(k).length}</span></div>
-        ${by.get(k).map(rowHtml).join("")}</div>`).join("")
-        : `<div class="empty-note">No open tasks. Write "- [ ] something" in any note; add "📅 2026-10-12" or "due: 2026-10-12" for a date.</div>`}`);
-    left.badge("tasks", by.get("overdue").length + by.get("today").length);
-  }
-  tasksPane.addEventListener("click", async e => {
-    const r = e.target.closest(".task-row");
-    if (!r) return;
-    if (!e.target.closest(".task-check")) { app.open(r.dataset.id); return; }
-    e.target.disabled = true;
-    try {
-      await tabsApi.saveAll();
-      const n = await api.getItem(r.dataset.id);
-      const line = +r.dataset.line;
-      const t = parseTasks(n.body).find(x => x.line === line && !x.done);
-      if (!t) throw new Error("the note changed; try again");
-      await api.updateItem(n.id, { body: toggleTask(n.body, line) });
-      await app.reload();
-      toast(`Done: ${t.text}`);
-    } catch (err) {
-      e.target.checked = false;
-      e.target.disabled = false;
-      toast(`Couldn't tick it off: ${err.message || err}`, "error");
-    }
-  });
-
-  // ---------------------------------------------------------------- filters
-  const filters = left.add({ id: "filters", title: "Graph filters", iconName: "filters" });
-  function renderFilters() {
-    const st = graph.state;
-    const items = [...app.items.values()];
-    const lobes = [...app.lobes, app.lobe.get(UNSORTED.id)].filter(Boolean);
-    setHtml(filters, `
-      <div class="side-section">
-        <div class="side-label">Types</div>
-        ${TYPES.map(t => `<label class="row check-row">
-          <input type="checkbox" data-type="${t.id}" ${st.types.has(t.id) ? "checked" : ""} />
-          ${typeIcon(t.id, "var(--muted)", 12)}<span class="row-title">${t.name}</span>
-          <span class="count">${items.filter(n => n.type === t.id).length}</span></label>`).join("")}
-      </div>
-      <div class="side-section">
-        <div class="side-label">Lobes</div>
-        ${lobes.map(l => {
-          const c = items.filter(n => n.lobe === l.id).length;
-          if (!c) return ""; // lobes with no items (e.g. unused sample lobes) stay out of the way
-          return `<button type="button" class="row" data-lobe="${esc(l.id)}" title="Fly to lobe">
-            <span class="dot" style="background:${l.color}"></span><span class="row-title">${esc(l.name)}</span><span class="count">${c}</span></button>`;
-        }).join("")}
-      </div>
-      <div class="side-section">
-        <div class="side-label">Links</div>
-        <label class="row check-row" title="Wikilinks are always shown"><input type="checkbox" checked disabled />
-          <span class="line-key solid"></span><span class="row-title">Wikilinks</span></label>
-        <label class="row check-row"><input type="checkbox" data-similar ${st.showSimilar ? "checked" : ""} />
-          <span class="line-key dashed"></span><span class="row-title">Similar</span></label>
-      </div>`);
-  }
-  filters.addEventListener("change", e => {
-    if (e.target.dataset.type) {
-      const types = [...filters.querySelectorAll("[data-type]")].filter(x => x.checked).map(x => x.dataset.type);
-      graph.setTypes(types);
-    } else if ("similar" in e.target.dataset) graph.setShowSimilar(e.target.checked);
-  });
-  filters.addEventListener("click", e => {
-    const l = e.target.closest("[data-lobe]");
-    if (l) {
-      app.emit("show-graph");
-      graph.focusLobe(app.lobe.get(l.dataset.lobe));
-    }
-  });
-
-  // right-click on any item row in the left sidebar
-  document.getElementById("left").addEventListener("contextmenu", e => {
-    const r = e.target.closest(".item-row");
+  tagsPane.addEventListener("contextmenu", e => {
+    const r = e.target.closest(".file-row");
     if (!r) return;
     e.preventDefault();
-    itemMenu(r.dataset.id, { x: e.clientX, y: e.clientY });
+    fileMenu(r.dataset.id, { x: e.clientX, y: e.clientY });
   });
 
-  function renderAll() { renderFiles(); renderTags(); renderInbox(); renderTasks(); renderFilters(); }
+  function renderAll() { renderFiles(); renderTags(); }
   app.on("data", renderAll);
-  app.on("graph-filters", renderFilters);
   app.on("select", () => {
-    for (const r of document.querySelectorAll("#left .item-row"))
-      r.classList.toggle("on", r.dataset.id === app.selected);
-    document.querySelector(`#left .side-pane:not([hidden]) .item-row.on`)?.scrollIntoView({ block: "nearest" });
+    for (const r of document.querySelectorAll("#left .file-row")) r.classList.toggle("on", r.dataset.id === app.selected);
   });
+  app.on("focus-folder", path => graph.focusFolder(path));
 
-  return { focusFilter: () => { left.show("files"); filterInput.focus(); } };
+  return { reveal: id => app.emit("reveal", id) };
 }

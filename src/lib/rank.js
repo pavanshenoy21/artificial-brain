@@ -18,21 +18,3 @@ export function fuzzy(text, q) {
   }
   return { score: score - t.length * 0.02, hits };
 }
-
-
-// Merge keyword hits with semantic hits. Keyword scores are normalised to the
-// best hit; an item found by both gets both. Semantic-only items need a decent score.
-export function blend(keyword, sem, wSem = 0.45) {
-  const out = new Map();
-  const top = Math.max(1e-9, ...keyword.map(h => h.score));
-  for (const h of keyword) out.set(h.id, { id: h.id, snippet: h.snippet, score: (1 - wSem) * (h.score / top) });
-  for (const h of sem) {
-    if (h.score < 0.35 && !out.has(h.id)) continue;
-    const cur = out.get(h.id) || { id: h.id, snippet: "", score: 0 };
-    cur.score += wSem * h.score;
-    cur.semantic = true;
-    out.set(h.id, cur);
-  }
-  return [...out.values()].sort((a, b) => b.score - a.score);
-}
-

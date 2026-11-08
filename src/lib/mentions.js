@@ -19,7 +19,7 @@ function masked(body) {
 
 export function namesOf(n) {
   const stem = (n.path || "").split("/").pop().replace(/\.md$/, "");
-  const all = [n.title, stem, ...[].concat(n.aliases ?? [], n.alias ?? []).flatMap(x => String(x).split(","))];
+  const all = [n.title, stem, ...[].concat(n.props?.aliases ?? [], n.props?.alias ?? []).flatMap(x => String(x).split(","))];
   const seen = new Set();
   return all.map(x => String(x || "").trim()).filter(x => {
     const k = x.toLowerCase();

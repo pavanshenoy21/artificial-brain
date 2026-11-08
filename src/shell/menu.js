@@ -8,7 +8,7 @@ let el;
 
 /**
  * @param {{x:number,y:number}} at  viewport position
- * @param {Array<{label:string, iconName?:string, run?:()=>any, disabled?:string|false, keys?:string}|"-">} items
+ * @param {Array<{label:string, iconName?:string, swatch?:string, danger?:boolean, run?:()=>any, disabled?:string|false, keys?:string}|"-">} items
  */
 export function openMenu(at, items) {
   closeMenu();
@@ -16,8 +16,8 @@ export function openMenu(at, items) {
   el.className = "menu";
   el.setAttribute("role", "menu");
   el.innerHTML = items.map((it, i) => it === "-" ? `<div class="menu-sep"></div>`
-    : `<button type="button" role="menuitem" class="menu-item" data-i="${i}" ${it.disabled ? `aria-disabled="true" title="${esc(it.disabled)}"` : ""}>
-        ${it.iconName ? icon(it.iconName, { size: 14 }) : `<span class="menu-gap"></span>`}<span>${esc(it.label)}</span>${it.keys ? `<kbd>${esc(it.keys)}</kbd>` : ""}</button>`).join("");
+    : `<button type="button" role="menuitem" class="menu-item${it.danger ? " danger" : ""}" data-i="${i}" ${it.disabled ? `aria-disabled="true" title="${esc(it.disabled)}"` : ""}>
+        ${it.swatch ? `<span class="menu-swatch" style="background:${esc(it.swatch)}"></span>` : ""}${it.iconName ? icon(it.iconName, { size: 14 }) : it.swatch ? "" : `<span class="menu-gap"></span>`}<span>${esc(it.label)}</span>${it.keys ? `<kbd>${esc(it.keys)}</kbd>` : ""}</button>`).join("");
   document.body.appendChild(el);
   const r = el.getBoundingClientRect();
   el.style.left = `${Math.min(at.x, innerWidth - r.width - 6)}px`;

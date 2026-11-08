@@ -1,47 +1,40 @@
-//! The vault on disk: a folder of markdown files, one per item.
+//! The vault on disk, exactly as Obsidian keeps it: a folder of markdown
+//! notes (plus `.canvas` boards) in any folder structure. A note's identity is
+//! its path, its title is its file name, and the app never adds anything to
+//! a file that the user didn't type (no ids, no timestamps).
 //!
-//! ```text
-//! <vault>/notes/*.md  links/  skills/  hackathons/  projects/
-//! <vault>/.brain/lobes.json   history/ (originals kept by AI actions)
-//! <vault>/.trash/             deleted files end up here, never hard-deleted
-//! ```
-//! Each file: YAML frontmatter (id, type, title, lobe, tags, type fields,
-//! created, updated) + markdown body. Files dropped in by hand or made in
-//! Obsidian work too: the id falls back to the path, the type to the folder.
+//! `.obsidian/`, `.trash/`, `.git/` and other dot-folders are left alone.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::canvas;
-use crate::error::Result;
+use crate::error::{err, Result};
 use crate::markdown as md;
 
-pub const TYPES: [&str; 5] = ["note", "link", "skill", "hackathon", "project"];
-/// The app's own per-type folders (+ `canvases/` for new canvases and
-/// `daily/` for daily notes): they never become lobes.
-pub const TYPE_DIRS: [&str; 7] = ["notes", "links", "skills", "hackathons", "projects", "canvases", "daily"];
-
-/// An item as the frontend sees it: a flat object, type-specific fields inline.
+/// A note or canvas as the frontend sees it.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Item {
+    /// Vault-relative path with forward slashes (also the identity).
     pub id: String,
+    /// "note" (.md) or "canvas" (.canvas)
     #[serde(rename = "type")]
     pub kind: String,
-    pub lobe: Option<String>,
+    /// File name without extension.
     pub title: String,
+    /// `tags:` from frontmatter.
     pub tags: Vec<String>,
-    /// #tags written inline in the body (read-only here; never copied to frontmatter).
+    /// #tags written in the body (read-only here).
     pub inline_tags: Vec<String>,
     pub body: String,
-    /// Path relative to the vault, with forward slashes.
     pub path: String,
-    pub created: Option<String>,
-    pub updated: Option<String>,
-    #[serde(flatten)]
+    /// Every other frontmatter property, as written (sent to the UI as `props`,
+    /// so a property called "id" or "title" can't clash with the fields above).
+    #[serde(rename = "props")]
     pub fields: Map<String, Value>,
 }
 
@@ -58,51 +51,6 @@ impl Item {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Lobe {
-    pub id: String,
-    pub name: String,
-    pub color: String,
-    /// Top-level vault folder this lobe was made for: items in that folder
-    /// use this lobe unless their frontmatter sets another one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub folder: Option<String>,
-}
-
-/// Calm, distinct solid colours for lobes created automatically from folders.
-pub const LOBE_COLORS: [&str; 16] = [
-    "#e06c75", "#56b6c2", "#a98fe0", "#d6a64f", "#7fb77e", "#d98a5f", "#6c9be0", "#c678b6",
-    "#8fb3a0", "#c9a26b", "#7a8bd6", "#b5705f", "#5fa8a0", "#b3b35f", "#9a7fb8", "#d07f8f",
-];
-
-/// Lobe id for a folder name: lowercase, dashes, prefixed so it can't clash with hand-made lobes.
-pub fn folder_lobe_id(folder: &str) -> String {
-    let slug: String = folder
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    format!("folder-{}", if slug.is_empty() { "x".into() } else { slug })
-}
-
-pub fn default_lobes() -> Vec<Lobe> {
-    [
-        ("sec", "Security & CTF", "#e06c75"),
-        ("web", "Web & Apps", "#56b6c2"),
-        ("ai", "AI & ML", "#a98fe0"),
-        ("cp", "Competitive Programming", "#d6a64f"),
-        ("sys", "Linux & Systems", "#7fb77e"),
-        ("col", "College & Life", "#d98a5f"),
-    ]
-    .into_iter()
-    .map(|(id, name, color)| Lobe { id: id.into(), name: name.into(), color: color.into(), folder: None })
-    .collect()
-}
-
 pub struct Vault {
     root: PathBuf,
 }
@@ -110,7 +58,7 @@ pub struct Vault {
 impl Vault {
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
-        fs::create_dir_all(root.join(".brain"))?;
+        fs::create_dir_all(&root)?;
         Ok(Vault { root })
     }
 
@@ -127,10 +75,10 @@ impl Vault {
         rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
     }
 
-    /// Every item file (skips dot-folders like .brain, .trash, .obsidian, .git).
+    /// Every note and canvas (dot-folders skipped).
     pub fn files(&self) -> Result<Vec<PathBuf>> {
         let mut out = Vec::new();
-        collect_md(&self.root, &mut out)?;
+        collect(&self.root, &mut out)?;
         out.sort();
         Ok(out)
     }
@@ -143,229 +91,128 @@ impl Vault {
         Ok(parse_item(&text, &self.rel(file), &stem_of(file)))
     }
 
+    /// Writes a note. The frontmatter block is kept byte for byte when its
+    /// properties didn't change, and CRLF files stay CRLF.
     pub fn write(&self, file: &Path, item: &Item) -> Result<()> {
         if canvas::is_canvas(file) {
-            return crate::error::err("a canvas is saved as JSON, not as a note");
+            return err("a canvas is saved as JSON, not as a note");
         }
         if let Some(dir) = file.parent() {
             fs::create_dir_all(dir)?;
         }
-        let mut text = render_item(item);
-        // keep Windows line endings if the file used them
-        if fs::read(file).map(|b| b.windows(2).any(|w| w == b"\r\n")).unwrap_or(false) {
+        let old = fs::read_to_string(file).ok();
+        let mut text = old
+            .as_deref()
+            .and_then(|o| keep_frontmatter(o, item, &self.rel(file)))
+            .unwrap_or_else(|| render_item(item));
+        if old.as_deref().is_some_and(|o| o.contains("\r\n")) {
             text = text.replace("\r\n", "\n").replace('\n', "\r\n");
         }
         write_atomic(file, &text)
     }
 
-    /// `<vault>/<type dir>/<stem>.md`, or `<stem> 2.md` … if taken. `current`
-    /// is the item's own file, which doesn't count as taken.
-    pub fn unique_path(&self, dir: &Path, stem: &str, current: Option<&Path>) -> PathBuf {
-        self.unique_path_ext(dir, stem, "md", current)
-    }
-
-    pub fn unique_path_ext(&self, dir: &Path, stem: &str, ext: &str, current: Option<&Path>) -> PathBuf {
+    /// `<dir>/<stem>.<ext>`, or Obsidian-style `<stem> 1.<ext>`, `<stem> 2.<ext>` …
+    /// if taken. `current` (the item's own file) doesn't count as taken.
+    pub fn unique_path(&self, dir: &Path, stem: &str, ext: &str, current: Option<&Path>) -> PathBuf {
         let mut candidate = dir.join(format!("{stem}.{ext}"));
-        let mut n = 2;
-        while candidate.exists() && Some(candidate.as_path()) != current {
+        let mut n = 1;
+        while candidate.exists() && !same_file(&candidate, current) {
             candidate = dir.join(format!("{stem} {n}.{ext}"));
             n += 1;
         }
         candidate
     }
 
-    pub fn type_dir(&self, kind: &str) -> PathBuf {
-        self.root.join(type_dir(kind))
-    }
-
-    pub fn trash(&self, file: &Path) -> Result<PathBuf> {
+    /// Moves a file or folder into `<vault>/.trash/` (like Obsidian's "Move to
+    /// Obsidian trash"); nothing is ever hard-deleted.
+    pub fn trash(&self, path: &Path) -> Result<PathBuf> {
         let dir = self.root.join(".trash");
         fs::create_dir_all(&dir)?;
-        let ext = file.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "md".into());
-        let dest = self.unique_path_ext(&dir, &stem_of(file), &ext, None);
-        fs::rename(file, &dest)?;
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let (stem, ext) = match name.rsplit_once('.') {
+            Some((s, e)) if path.is_file() && !s.is_empty() => (s.to_string(), format!(".{e}")),
+            _ => (name.clone(), String::new()),
+        };
+        let mut dest = dir.join(&name);
+        let mut n = 1;
+        while dest.exists() {
+            dest = dir.join(format!("{stem} {n}{ext}"));
+            n += 1;
+        }
+        fs::rename(path, &dest)?;
         Ok(dest)
     }
+}
 
-    // ------------------------------------------------------------ lobes
-
-    fn lobes_file(&self) -> PathBuf {
-        self.root.join(".brain").join("lobes.json")
-    }
-
-    /// Lobes from `.brain/lobes.json`, seeded with the defaults on first use.
-    pub fn lobes(&self) -> Result<Vec<Lobe>> {
-        let f = self.lobes_file();
-        if !f.exists() {
-            write_atomic(&f, &(serde_json::to_string_pretty(&default_lobes())? + "\n"))?;
-        }
-        let text = fs::read_to_string(&f)?;
-        Ok(serde_json::from_str(&text).unwrap_or_else(|_| default_lobes()))
-    }
-
-    pub fn save_lobes(&self, lobes: &[Lobe]) -> Result<()> {
-        // a folder lobe the user deleted shouldn't come back on the next sync
-        let before = self.lobes().unwrap_or_default();
-        let mut ignored = self.ignored_folders();
-        for l in before.iter().filter(|l| l.folder.is_some()) {
-            if !lobes.iter().any(|x| x.folder == l.folder) {
-                ignored.push(l.folder.clone().unwrap());
-            }
-        }
-        ignored.retain(|f| !lobes.iter().any(|x| x.folder.as_deref() == Some(f.as_str())));
-        ignored.sort();
-        ignored.dedup();
-        write_atomic(&self.root.join(".brain").join("folders-ignored.json"), &(serde_json::to_string_pretty(&ignored)? + "\n"))?;
-        write_atomic(&self.lobes_file(), &(serde_json::to_string_pretty(lobes)? + "\n"))
-    }
-
-    fn ignored_folders(&self) -> Vec<String> {
-        fs::read_to_string(self.root.join(".brain").join("folders-ignored.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default()
-    }
-
-    /// Adds a lobe (with its own colour) for every top-level folder that has
-    /// none yet. The app's own type folders (notes/, links/, …) don't count.
-    pub fn ensure_folder_lobes(&self, folders: &[String]) -> Result<Vec<Lobe>> {
-        let mut lobes = self.lobes()?;
-        let ignored = self.ignored_folders();
-        let mut changed = false;
-        for f in folders {
-            if TYPE_DIRS.contains(&f.as_str()) || ignored.contains(f) || lobes.iter().any(|l| l.folder.as_deref() == Some(f.as_str())) {
-                continue;
-            }
-            let used: Vec<&str> = lobes.iter().map(|l| l.color.as_str()).collect();
-            let color = LOBE_COLORS
-                .iter()
-                .find(|c| !used.contains(c))
-                .copied()
-                .unwrap_or(LOBE_COLORS[lobes.len() % LOBE_COLORS.len()]);
-            let mut id = folder_lobe_id(f);
-            let mut n = 2;
-            while lobes.iter().any(|l| l.id == id) {
-                id = format!("{}-{n}", folder_lobe_id(f));
-                n += 1;
-            }
-            lobes.push(Lobe { id, name: f.clone(), color: color.into(), folder: Some(f.clone()) });
-            changed = true;
-        }
-        if changed {
-            write_atomic(&self.lobes_file(), &(serde_json::to_string_pretty(&lobes)? + "\n"))?;
-        }
-        Ok(lobes)
-    }
-
-    /// `.brain/<name>.json` (null if missing or unreadable). Names are plain
-    /// words, so nothing outside `.brain/` can be reached.
-    pub fn brain_state(&self, name: &str) -> Result<Value> {
-        let f = self.state_file(name)?;
-        Ok(fs::read_to_string(f).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null))
-    }
-
-    pub fn set_brain_state(&self, name: &str, value: &Value) -> Result<()> {
-        write_atomic(&self.state_file(name)?, &(serde_json::to_string_pretty(value)? + "\n"))
-    }
-
-    fn state_file(&self, name: &str) -> Result<PathBuf> {
-        let ok = !name.is_empty() && name.len() <= 40 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-        if !ok || ["lobes", "folders-ignored"].contains(&name) {
-            return crate::error::err(format!("bad state name {name:?}"));
-        }
-        Ok(self.root.join(".brain").join(format!("{name}.json")))
-    }
-
-    /// Keeps an original before an AI action changes it (`.brain/history/`).
-    pub fn save_history(&self, item: &Item) -> Result<PathBuf> {
-        let dir = self.root.join(".brain").join("history");
-        fs::create_dir_all(&dir)?;
-        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-        let file = self.unique_path(&dir, &format!("{} {stamp}", md::file_stem_for(&item.title)), None);
-        write_atomic(&file, &render_item(item))?;
-        Ok(file)
+/// On a case-insensitive disk "Note.md" and "note.md" are the same file.
+fn same_file(a: &Path, b: Option<&Path>) -> bool {
+    match b {
+        Some(b) => a == b || (a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase() && a.exists()),
+        None => false,
     }
 }
 
 // ---------------------------------------------------------------- format
 
-/// Parses a markdown file into an item. `rel` and `stem` supply fallbacks
-/// for files without frontmatter.
+/// Parses a markdown file. Broken YAML gives no properties but keeps the body.
 pub fn parse_item(text: &str, rel: &str, stem: &str) -> Item {
     let (fm, body) = md::split_frontmatter(text);
-    let mut front = fm.map(md::parse_frontmatter).unwrap_or_default();
-
-    let mut take = |k: &str| match front.remove(k) {
-        Some(Value::String(s)) if !s.trim().is_empty() => Some(s.trim().to_string()),
-        Some(Value::Number(n)) => Some(n.to_string()),
-        _ => None,
-    };
-    let id = take("id").unwrap_or_else(|| rel.to_string());
-    let kind = take("type")
-        .filter(|t| TYPES.contains(&t.as_str()))
-        .unwrap_or_else(|| type_from_dir(rel).to_string());
-    let lobe = take("lobe");
-    let title = take("title").unwrap_or_else(|| stem.to_string());
-    let created = take("created");
-    let updated = take("updated");
-    let tags = md::normalize_tags(front.get("tags"));
-    front.remove("tags");
+    let mut fields = fm.map(md::parse_frontmatter).unwrap_or_default();
+    let tags = md::normalize_tags(fields.get("tags"));
+    fields.remove("tags");
     let body = body.trim_start_matches(['\n', '\r']).trim_end().to_string();
     let inline_tags = md::inline_tags(&body);
-
     Item {
-        id,
-        kind,
-        lobe,
-        title,
+        id: rel.to_string(),
+        kind: "note".into(),
+        title: stem.to_string(),
         tags,
         inline_tags,
         body,
         path: rel.to_string(),
-        created,
-        updated,
-        fields: front,
+        fields,
     }
 }
 
-/// Frontmatter is kept minimal, so notes from an existing (Obsidian) vault
-/// stay clean: `id` only when it isn't just the file's path, `type` only when
-/// the folder doesn't already imply it, `title` only when the file name had
-/// to drop characters, `tags`/`lobe` only when set. A note with nothing to
-/// say gets no frontmatter block at all.
-pub fn render_item(item: &Item) -> String {
-    let mut front = Map::new();
-    let stem = item.path.rsplit('/').next().unwrap_or("").trim_end_matches(".md");
-    if item.id != item.path {
-        front.insert("id".into(), item.id.clone().into());
-    }
-    if item.kind != type_from_dir(&item.path) {
-        front.insert("type".into(), item.kind.clone().into());
-    }
-    if item.title != stem {
-        front.insert("title".into(), item.title.clone().into());
-    }
-    if let Some(l) = &item.lobe {
-        front.insert("lobe".into(), l.clone().into());
-    }
+fn front_of(item: &Item) -> Map<String, Value> {
+    let mut front = item.fields.clone();
     if !item.tags.is_empty() {
         front.insert("tags".into(), item.tags.clone().into());
     }
-    for (k, v) in &item.fields {
-        front.insert(k.clone(), v.clone());
+    front
+}
+
+/// The file text for an item: frontmatter only when there are properties.
+pub fn render_item(item: &Item) -> String {
+    md::render(&front_of(item), &item.body)
+}
+
+/// Reuses the existing frontmatter block verbatim when the properties are
+/// the same as before (only the body was edited). Also keeps a block that
+/// failed to parse instead of dropping it.
+fn keep_frontmatter(old: &str, item: &Item, rel: &str) -> Option<String> {
+    let (fm, old_body) = md::split_frontmatter(old);
+    fm?;
+    let before = parse_item(old, rel, &item.title);
+    if (&before.tags, &before.fields) != (&item.tags, &item.fields) {
+        return None;
     }
-    if let Some(c) = &item.created {
-        front.insert("created".into(), c.clone().into());
+    let head = &old[..old.len() - old_body.len()];
+    let rest = old_body.trim_start_matches(['\n', '\r']);
+    let gap = &old_body[..old_body.len() - rest.len()];
+    let mut out = String::with_capacity(old.len() + item.body.len());
+    out.push_str(head);
+    if !item.body.is_empty() {
+        out.push_str(gap);
+        out.push_str(&item.body);
+        out.push('\n');
     }
-    if let Some(u) = &item.updated {
-        front.insert("updated".into(), u.clone().into());
-    }
-    md::render(&front, &item.body)
+    Some(out)
 }
 
 // ---------------------------------------------------------------- fs utils
 
-fn collect_md(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         if entry.file_name().to_string_lossy().starts_with('.') {
@@ -374,7 +221,7 @@ fn collect_md(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let path = entry.path();
         let ft = entry.file_type()?;
         if ft.is_dir() {
-            collect_md(&path, out)?;
+            collect(&path, out)?;
         } else if ft.is_file() && (is_md(&path) || canvas::is_canvas(&path)) {
             out.push(path);
         }
@@ -390,7 +237,7 @@ pub fn stem_of(file: &Path) -> String {
     file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// (mtime in ns, size) — cheap change detection for sync.
+/// (mtime in ns, size): cheap change detection for sync.
 pub fn file_stamp(file: &Path) -> Result<(i64, i64)> {
     let meta = fs::metadata(file)?;
     let mtime = meta.modified()?.duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as i64).unwrap_or(0);
@@ -406,79 +253,77 @@ pub fn write_atomic(file: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn type_dir(kind: &str) -> &'static str {
-    match kind {
-        "link" => "links",
-        "skill" => "skills",
-        "hackathon" => "hackathons",
-        "project" => "projects",
-        "canvas" => canvas::DIR,
-        _ => "notes",
-    }
-}
-
-fn type_from_dir(rel: &str) -> &'static str {
-    // exact (lowercase) names only: an Obsidian vault's "Projects/" folder is
-    // the user's own folder, not the app's project type
-    match rel.split('/').next().unwrap_or("") {
-        "links" => "link",
-        "skills" => "skill",
-        "hackathons" => "hackathon",
-        "projects" => "project",
-        _ => "note",
-    }
-}
-
-pub fn new_id() -> String {
-    ulid::Ulid::generate().to_string()
-}
-
-pub fn now() -> String {
-    chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%:z").to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn item_round_trip() {
-        let mut fields = Map::new();
-        fields.insert("url".into(), json!("https://x.dev"));
-        fields.insert("stack".into(), json!(["Rust", "JS"]));
-        let item = Item {
-            id: new_id(),
-            kind: "link".into(),
-            lobe: Some("web".into()),
-            title: "Writeup: JWT".into(),
-            tags: vec!["ctf".into()],
-            inline_tags: vec!["inline".into()],
-            body: "See [[Other]] #inline".into(),
-            path: "links/Writeup JWT.md".into(),
-            created: Some("2026-09-24T10:00:00+05:30".into()),
-            updated: Some("2026-09-24T10:00:00+05:30".into()),
-            fields,
-        };
-        let text = render_item(&item);
-        assert!(text.starts_with("---\nid: "));
-        assert_eq!(parse_item(&text, &item.path, "Writeup JWT"), item);
+    pub fn tmp_dir(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let d = std::env::temp_dir().join(format!("brain-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let _ = fs::remove_dir_all(&d);
+        d
     }
 
     #[test]
-    fn plain_file_falls_back() {
-        let it = parse_item("just text", "skills/Rust.md", "Rust");
-        assert_eq!((it.id.as_str(), it.kind.as_str(), it.title.as_str()), ("skills/Rust.md", "skill", "Rust"));
-        assert_eq!(parse_item("x", "Projects/Brain/Plan.md", "Plan").kind, "note");
-        let it = parse_item("---\ntype: wat\n---\n", "Loose.md", "Loose");
-        assert_eq!(it.kind, "note");
+    fn parse_takes_title_from_the_file_name() {
+        let it = parse_item("---\ntitle: Other\ntags: a, b\nlobe: x\n---\nBody #inline\n", "Uni/OS.md", "OS");
+        assert_eq!((it.id.as_str(), it.title.as_str(), it.kind.as_str()), ("Uni/OS.md", "OS", "note"));
+        assert_eq!(it.tags, vec!["a", "b"]);
+        assert_eq!(it.inline_tags, vec!["inline"]);
+        assert_eq!(it.fields["title"], "Other", "frontmatter title is just a property");
+        assert_eq!(it.fields["lobe"], "x");
+        assert_eq!(it.body, "Body #inline");
     }
 
     #[test]
-    fn ulids_are_unique_and_sortable() {
-        let a = new_id();
-        let b = new_id();
-        assert_eq!(a.len(), 26);
-        assert_ne!(a, b);
+    fn writes_keep_frontmatter_bytes_and_line_endings() {
+        let d = tmp_dir("vault");
+        let v = Vault::open(&d).unwrap();
+        let f = v.abs("a.md");
+        let raw = "---\ntags: a, b\n# a comment\nweird:   spacing\n---\n\nBody\n";
+        fs::write(&f, raw).unwrap();
+        let mut it = v.read(&f).unwrap();
+        it.body = "Body 2".into();
+        v.write(&f, &it).unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), "---\ntags: a, b\n# a comment\nweird:   spacing\n---\n\nBody 2\n");
+
+        // broken YAML is kept as-is when only the body changes
+        fs::write(&f, "---\ntags: [unclosed\n---\nOld\n").unwrap();
+        let mut it = v.read(&f).unwrap();
+        it.body = "New".into();
+        v.write(&f, &it).unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), "---\ntags: [unclosed\n---\nNew\n");
+
+        // a property change re-renders the block
+        let mut it = v.read(&f).unwrap();
+        it.fields.insert("status".into(), json!("done"));
+        v.write(&f, &it).unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), "---\nstatus: done\n---\n\nNew\n");
+
+        fs::write(&f, "one\r\ntwo\r\n").unwrap();
+        let mut it = v.read(&f).unwrap();
+        it.body = "one\ntwo\nthree".into();
+        v.write(&f, &it).unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), "one\r\ntwo\r\nthree\r\n");
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn unique_names_and_trash_like_obsidian() {
+        let d = tmp_dir("names");
+        let v = Vault::open(&d).unwrap();
+        assert_eq!(v.unique_path(&d, "Untitled", "md", None), d.join("Untitled.md"));
+        fs::write(d.join("Untitled.md"), "").unwrap();
+        assert_eq!(v.unique_path(&d, "Untitled", "md", None), d.join("Untitled 1.md"));
+        assert_eq!(v.unique_path(&d, "Untitled", "md", Some(&d.join("Untitled.md"))), d.join("Untitled.md"));
+        let t = v.trash(&d.join("Untitled.md")).unwrap();
+        assert_eq!(t, d.join(".trash/Untitled.md"));
+        fs::write(d.join("Untitled.md"), "").unwrap();
+        assert_eq!(v.trash(&d.join("Untitled.md")).unwrap(), d.join(".trash/Untitled 1.md"));
+        fs::create_dir_all(d.join("Folder/Sub")).unwrap();
+        assert_eq!(v.trash(&d.join("Folder")).unwrap(), d.join(".trash/Folder"));
+        let _ = fs::remove_dir_all(d);
     }
 }

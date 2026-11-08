@@ -3,14 +3,12 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": [
-    "main",
-    "capture"
+    "main"
   ],
   "permissions": [
     "core:default",
     "opener:default",
     "dialog:default",
-    "global-shortcut:default",
     "core:window:allow-hide",
     "core:window:allow-set-focus",
     "core:window:allow-destroy"

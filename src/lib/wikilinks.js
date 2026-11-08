@@ -56,23 +56,25 @@ export function fileStem(title) {
   return s || "Untitled";
 }
 
-// Lookup of lowercase title / file stem / path (no .md) → id.
+// Lookup of lowercase file name / path (".md" dropped) / alias -> path, the
+// same rules as index.rs: when two files share a name, a bare [[Name]] goes
+// to the one nearest the vault root; a real file name beats an alias.
 export function linkIndex(items) {
   const m = new Map();
-  // Obsidian aliases first, so titles, file names and paths win on a clash
   for (const it of items)
-    for (const a of [].concat(it.aliases ?? [], it.alias ?? []).flatMap(x => String(x).split(",")))
+    for (const a of [].concat(it.props?.aliases ?? [], it.props?.alias ?? []).flatMap(x => String(x).split(",")))
       if (a.trim()) m.set(a.trim().toLowerCase(), it.id);
-  for (const it of items) m.set(it.title.toLowerCase(), it.id);
-  for (const it of items) {
-    const p = (it.path || "").replace(/\.md$/, "");
-    if (!p) continue;
-    m.set(p.toLowerCase(), it.id);
-    m.set(p.split("/").pop().toLowerCase(), it.id);
+  const depth = p => p.split("/").length;
+  const paths = items.map(it => it.path || it.id).filter(Boolean)
+    .sort((a, b) => depth(b) - depth(a) || (b < a ? -1 : b > a ? 1 : 0));
+  for (const p of paths) {
+    const noExt = p.replace(/\.md$/, "");
+    m.set(noExt.toLowerCase(), p);
+    m.set(noExt.split("/").pop().toLowerCase(), p);
   }
   return m;
 }
 
 export function resolve(index, target) {
-  return index.get(target.replace(/\.md$/, "").toLowerCase());
+  return index.get(target.trim().replace(/\.md$/, "").toLowerCase());
 }

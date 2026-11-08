@@ -1,5 +1,5 @@
 //! SQLite index over the vault (app data dir, `brain.db`). Only a cache:
-//! everything here can be rebuilt from the markdown files.
+//! everything here can be rebuilt from the files.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -12,13 +12,12 @@ use crate::error::Result;
 use crate::markdown as md;
 use crate::vault::Item;
 
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Link {
     pub source: String,
     pub target: String,
-    pub kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -58,24 +57,20 @@ impl Index {
             self.db.execute_batch(
                 "DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS node_tags; DROP TABLE IF EXISTS nodes;
                  DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS embeddings; DROP TABLE IF EXISTS items_fts;
-                 DROP TABLE IF EXISTS items;",
+                 DROP TABLE IF EXISTS items; DROP TABLE IF EXISTS meta;",
             )?;
         }
         self.db.execute_batch(&format!(
             "PRAGMA journal_mode = WAL;
              PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS items (
-               id      TEXT PRIMARY KEY,
-               path    TEXT NOT NULL UNIQUE,
-               type    TEXT NOT NULL,
-               lobe    TEXT,
-               title   TEXT NOT NULL,
-               tags    TEXT NOT NULL,   -- JSON array (frontmatter)
-               inline_tags TEXT NOT NULL DEFAULT '[]', -- JSON array (#tags in the body)
-               fields  TEXT NOT NULL,   -- JSON object of type-specific fields
+               id      TEXT PRIMARY KEY,   -- vault-relative path
+               type    TEXT NOT NULL,      -- note | canvas
+               title   TEXT NOT NULL,      -- file name without extension
+               tags    TEXT NOT NULL,      -- JSON array (frontmatter)
+               inline_tags TEXT NOT NULL,  -- JSON array (#tags in the body)
+               fields  TEXT NOT NULL,      -- JSON object: other properties
                body    TEXT NOT NULL,
-               created TEXT,
-               updated TEXT,
                mtime   INTEGER NOT NULL,
                size    INTEGER NOT NULL
              );
@@ -88,19 +83,10 @@ impl Index {
              CREATE TABLE IF NOT EXISTS links (
                src  TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
                dst  TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-               kind TEXT NOT NULL,
-               PRIMARY KEY (src, dst, kind)
+               PRIMARY KEY (src, dst)
              );
              CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
                id UNINDEXED, title, tags, body, extra, tokenize = 'unicode61 remove_diacritics 2'
-             );
-             -- no foreign key: vectors survive a rebuild and are pruned after sync
-             CREATE TABLE IF NOT EXISTS embeddings (
-               item_id TEXT PRIMARY KEY,
-               model   TEXT NOT NULL,
-               dim     INTEGER NOT NULL,
-               hash    TEXT NOT NULL,   -- hash of the embedded text, to skip unchanged items
-               vector  BLOB NOT NULL    -- little-endian f32 x dim
              );
              CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              PRAGMA user_version = {SCHEMA_VERSION};"
@@ -113,63 +99,20 @@ impl Index {
         &self.db
     }
 
-    // ------------------------------------------------------------ writes
-
     pub fn begin(&mut self) -> Result<rusqlite::Transaction<'_>> {
         Ok(self.db.transaction()?)
     }
 
     /// (mtime, size) of every indexed path.
     pub fn stamps(&self) -> Result<HashMap<String, (i64, i64)>> {
-        let mut stmt = self.db.prepare("SELECT path, mtime, size FROM items")?;
+        let mut stmt = self.db.prepare("SELECT id, mtime, size FROM items")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Empties the index. Embeddings are kept unless `embeddings` is set
-    /// (a rebuild keeps them; switching vaults doesn't).
-    pub fn clear(&mut self, embeddings: bool) -> Result<()> {
+    pub fn clear(&mut self) -> Result<()> {
         self.db.execute_batch("DELETE FROM items; DELETE FROM items_fts;")?;
-        if embeddings {
-            self.db.execute("DELETE FROM embeddings", [])?;
-        }
         Ok(())
-    }
-
-    // ------------------------------------------------------------ embeddings
-
-    pub fn set_embedding(&self, id: &str, model: &str, hash: &str, v: &[f32]) -> Result<()> {
-        let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
-        self.db.execute(
-            "INSERT OR REPLACE INTO embeddings (item_id, model, dim, hash, vector) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, model, v.len() as i64, hash, bytes],
-        )?;
-        Ok(())
-    }
-
-    /// id -> hash of the text that was embedded, for one model.
-    pub fn embedding_hashes(&self, model: &str) -> Result<HashMap<String, String>> {
-        let mut stmt = self.db.prepare("SELECT item_id, hash FROM embeddings WHERE model = ?1")?;
-        let rows = stmt.query_map([model], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
-    }
-
-    /// All vectors for one model, only for items that still exist.
-    pub fn embeddings(&self, model: &str) -> Result<Vec<(String, Vec<f32>)>> {
-        let mut stmt = self.db.prepare(
-            "SELECT e.item_id, e.vector FROM embeddings e JOIN items i ON i.id = e.item_id WHERE e.model = ?1 ORDER BY e.item_id",
-        )?;
-        let rows = stmt.query_map([model], |r| {
-            let id: String = r.get(0)?;
-            let bytes: Vec<u8> = r.get(1)?;
-            Ok((id, bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()))
-        })?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
-    }
-
-    /// Drops vectors of items that no longer exist.
-    pub fn prune_embeddings(&self) -> Result<usize> {
-        Ok(self.db.execute("DELETE FROM embeddings WHERE item_id NOT IN (SELECT id FROM items)", [])?)
     }
 
     pub fn meta(&self, key: &str) -> Result<Option<String>> {
@@ -184,27 +127,19 @@ impl Index {
     // ------------------------------------------------------------ reads
 
     pub fn items(&self) -> Result<Vec<Item>> {
-        let mut stmt = self.db.prepare(&format!("{SELECT_ITEM} ORDER BY path"))?;
+        let mut stmt = self.db.prepare(&format!("{SELECT_ITEM} ORDER BY id"))?;
         let rows = stmt.query_map([], row_to_item)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn links(&self) -> Result<Vec<Link>> {
-        let mut stmt = self.db.prepare("SELECT src, dst, kind FROM links ORDER BY src, dst")?;
-        let rows = stmt.query_map([], |r| Ok(Link { source: r.get(0)?, target: r.get(1)?, kind: r.get(2)? }))?;
+        let mut stmt = self.db.prepare("SELECT src, dst FROM links ORDER BY src, dst")?;
+        let rows = stmt.query_map([], |r| Ok(Link { source: r.get(0)?, target: r.get(1)? }))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn get(&self, id: &str) -> Result<Option<Item>> {
         Ok(self.db.query_row(&format!("{SELECT_ITEM} WHERE id = ?1"), [id], row_to_item).optional()?)
-    }
-
-    pub fn path_of(&self, id: &str) -> Result<Option<String>> {
-        Ok(self.db.query_row("SELECT path FROM items WHERE id = ?1", [id], |r| r.get(0)).optional()?)
-    }
-
-    pub fn count(&self) -> Result<i64> {
-        Ok(self.db.query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))?)
     }
 
     /// Every tag in use with its count, most used first.
@@ -214,20 +149,10 @@ impl Index {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Full-text search (FTS5, bm25; title weighs most). Every word must
-    /// match, as a prefix, so "jw wri" finds "Writeup: JWT".
+    /// Full-text search (FTS5, bm25; file name weighs most). Every word must
+    /// match, as a prefix, so "jw wri" finds "Writeup JWT".
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
         let Some(q) = fts_query(query) else { return Ok(vec![]) };
-        self.search_fts(&q, limit)
-    }
-
-    /// Like `search`, but any word may match (for questions in Ask).
-    pub fn search_any(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
-        let Some(q) = fts_query_any(query) else { return Ok(vec![]) };
-        self.search_fts(&q, limit)
-    }
-
-    fn search_fts(&self, q: &str, limit: usize) -> Result<Vec<Hit>> {
         let mut stmt = self.db.prepare(
             "SELECT id, -bm25(items_fts, 0.0, 10.0, 4.0, 1.0, 0.5) AS score,
                     snippet(items_fts, 3, char(1), char(2), '…', 14)
@@ -238,23 +163,15 @@ impl Index {
     }
 }
 
-/// Inserts or replaces one item (by path). Two files claiming the same id
-/// (e.g. a copied file): the second one gets its path as id instead of
-/// clobbering the first.
-pub fn upsert(db: &Connection, mut item: Item, (mtime, size): (i64, i64)) -> Result<String> {
-    let owner: Option<String> =
-        db.query_row("SELECT path FROM items WHERE id = ?1", [&item.id], |r| r.get(0)).optional()?;
-    if matches!(&owner, Some(p) if *p != item.path) {
-        item.id = item.path.clone();
-    }
-    remove_path(db, &item.path)?;
+/// Inserts or replaces one item.
+pub fn upsert(db: &Connection, item: Item, (mtime, size): (i64, i64)) -> Result<()> {
+    remove_path(db, &item.id)?;
     db.execute(
-        "INSERT INTO items (id, path, type, lobe, title, tags, fields, body, created, updated, mtime, size, inline_tags)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO items (id, type, title, tags, inline_tags, fields, body, mtime, size)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
-            item.id, item.path, item.kind, item.lobe, item.title,
-            serde_json::to_string(&item.tags)?, serde_json::to_string(&item.fields)?, item.body,
-            item.created, item.updated, mtime, size, serde_json::to_string(&item.inline_tags)?
+            item.id, item.kind, item.title, serde_json::to_string(&item.tags)?, serde_json::to_string(&item.inline_tags)?,
+            serde_json::to_string(&item.fields)?, item.body, mtime, size
         ],
     )?;
     for t in &item.all_tags() {
@@ -264,41 +181,38 @@ pub fn upsert(db: &Connection, mut item: Item, (mtime, size): (i64, i64)) -> Res
         "INSERT INTO items_fts (id, title, tags, body, extra) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![item.id, item.title, item.all_tags().join(" "), item.body, extra_text(&item.fields)],
     )?;
-    Ok(item.id)
-}
-
-pub fn remove_path(db: &Connection, path: &str) -> Result<()> {
-    let id: Option<String> = db.query_row("SELECT id FROM items WHERE path = ?1", [path], |r| r.get(0)).optional()?;
-    if let Some(id) = id {
-        db.execute("DELETE FROM items_fts WHERE id = ?1", [&id])?;
-        db.execute("DELETE FROM items WHERE id = ?1", [&id])?;
-    }
     Ok(())
 }
 
-/// Recomputes explicit links from [[wikilinks]] in every body. Targets match
-/// case-insensitively by file name, vault-relative path or title.
+pub fn remove_path(db: &Connection, path: &str) -> Result<()> {
+    db.execute("DELETE FROM items_fts WHERE id = ?1", [path])?;
+    db.execute("DELETE FROM items WHERE id = ?1", [path])?;
+    Ok(())
+}
+
+/// Recomputes links from [[wikilinks]] in every body and in property values.
 pub fn rebuild_links(db: &Connection) -> Result<()> {
-    let rows: Vec<(String, String, String, String, String)> = {
-        let mut stmt = db.prepare("SELECT id, path, title, body, fields FROM items")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?;
+    let rows: Vec<(String, String, String)> = {
+        let mut stmt = db.prepare("SELECT id, body, fields FROM items")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-    let mut lookup = link_lookup(rows.iter().map(|(id, path, title, _, _)| (id.as_str(), path.as_str(), title.as_str())));
-    // Obsidian `aliases:` also resolve [[links]] (a real title/file name wins on a clash)
-    for (id, _, _, _, fields) in &rows {
+    let mut lookup = link_lookup(rows.iter().map(|(id, ..)| id.as_str()));
+    // Obsidian `aliases:` also resolve [[links]] (a real file name wins on a clash)
+    for (id, _, fields) in &rows {
         let fields: Value = serde_json::from_str(fields).unwrap_or(Value::Null);
         for alias in aliases(&fields) {
             lookup.entry(alias.to_lowercase()).or_insert_with(|| id.clone());
         }
     }
-    db.execute("DELETE FROM links WHERE kind = 'explicit'", [])?;
-    let mut stmt = db.prepare("INSERT OR IGNORE INTO links (src, dst, kind) VALUES (?1, ?2, 'explicit')")?;
-    for (id, _, _, body, fields) in &rows {
-        // links in the body, plus links in frontmatter values (e.g. used_in: ["[[Hackemon]]"])
+    db.execute("DELETE FROM links", [])?;
+    let mut stmt = db.prepare("INSERT OR IGNORE INTO links (src, dst) VALUES (?1, ?2)")?;
+    for (id, body, fields) in &rows {
         let fields: Value = serde_json::from_str(fields).unwrap_or(Value::Null);
         let mut targets = md::wikilinks(body);
-        targets.extend(md::wikilinks(&extra_text_value(&fields)));
+        if let Value::Object(o) = &fields {
+            targets.extend(md::wikilinks(&extra_text(o)));
+        }
         for target in targets {
             if let Some(t) = resolve(&lookup, &target) {
                 if t != id {
@@ -308,13 +222,6 @@ pub fn rebuild_links(db: &Connection) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn extra_text_value(v: &Value) -> String {
-    match v {
-        Value::Object(o) => extra_text(o),
-        _ => String::new(),
-    }
 }
 
 /// `aliases:` / `alias:` from frontmatter, as a YAML list or a single string.
@@ -330,26 +237,27 @@ pub fn aliases(fields: &Value) -> Vec<String> {
     out
 }
 
-/// lowercase title / file stem / path (no .md) -> id. Titles go in first so
-/// file names and paths win on a clash.
-pub fn link_lookup<'a>(items: impl Iterator<Item = (&'a str, &'a str, &'a str)> + Clone) -> HashMap<String, String> {
+/// lowercase file name / path (".md" dropped) -> path. Like Obsidian, when two
+/// files share a name, a bare [[Name]] goes to the one nearest the vault root.
+pub fn link_lookup<'a>(paths: impl Iterator<Item = &'a str>) -> HashMap<String, String> {
+    let mut paths: Vec<&str> = paths.collect();
+    // deepest first, so shallower paths overwrite them
+    paths.sort_by(|a, b| b.matches('/').count().cmp(&a.matches('/').count()).then(b.cmp(a)));
     let mut m = HashMap::new();
-    for (id, _, title) in items.clone() {
-        m.insert(title.to_lowercase(), id.to_string());
-    }
-    for (id, path, _) in items {
-        let no_ext = path.trim_end_matches(".md");
-        m.insert(no_ext.to_lowercase(), id.to_string());
-        m.insert(no_ext.rsplit('/').next().unwrap_or(no_ext).to_lowercase(), id.to_string());
+    for p in paths {
+        let no_ext = p.strip_suffix(".md").unwrap_or(p);
+        m.insert(no_ext.to_lowercase(), p.to_string());
+        m.insert(no_ext.rsplit('/').next().unwrap_or(no_ext).to_lowercase(), p.to_string());
     }
     m
 }
 
 pub fn resolve<'a>(lookup: &'a HashMap<String, String>, target: &str) -> Option<&'a String> {
-    lookup.get(&target.trim_end_matches(".md").to_lowercase())
+    let t = target.trim();
+    lookup.get(&t.strip_suffix(".md").unwrap_or(t).to_lowercase())
 }
 
-/// Searchable text from type-specific fields (url, summary, stack, …).
+/// Searchable text from properties.
 fn extra_text(fields: &Map<String, Value>) -> String {
     fn walk(v: &Value, out: &mut Vec<String>) {
         match v {
@@ -367,22 +275,6 @@ fn extra_text(fields: &Map<String, Value>) -> String {
     out.join(" ")
 }
 
-/// Looser query for questions: any word may match (OR), common words dropped.
-pub fn fts_query_any(q: &str) -> Option<String> {
-    const STOP: &[&str] = &[
-        "a", "an", "and", "are", "as", "at", "be", "by", "can", "did", "do", "does", "for", "from", "have", "how", "i",
-        "if", "in", "is", "it", "me", "my", "of", "on", "or", "should", "that", "the", "this", "to", "was", "what", "when",
-        "where", "which", "who", "why", "with", "you", "about", "any", "know", "tell",
-    ];
-    let words: Vec<String> = q
-        .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
-        .map(|w| w.trim_matches('-').to_lowercase())
-        .filter(|w| w.len() > 1 && !STOP.contains(&w.as_str()))
-        .map(|w| format!("\"{w}\"*"))
-        .collect();
-    (!words.is_empty()).then(|| words.join(" OR "))
-}
-
 /// User text -> FTS5 query: each word quoted (so punctuation can't break the
 /// syntax) and prefix-matched; words are ANDed.
 pub fn fts_query(q: &str) -> Option<String> {
@@ -395,23 +287,19 @@ pub fn fts_query(q: &str) -> Option<String> {
     (!words.is_empty()).then(|| words.join(" "))
 }
 
-const SELECT_ITEM: &str = "SELECT id, type, lobe, title, tags, body, path, created, updated, fields, inline_tags FROM items";
+const SELECT_ITEM: &str = "SELECT id, type, title, tags, inline_tags, fields, body FROM items";
 
 fn row_to_item(r: &rusqlite::Row) -> rusqlite::Result<Item> {
-    let tags: String = r.get(4)?;
-    let fields: String = r.get(9)?;
+    let id: String = r.get(0)?;
     Ok(Item {
-        id: r.get(0)?,
+        path: id.clone(),
+        id,
         kind: r.get(1)?,
-        lobe: r.get(2)?,
-        title: r.get(3)?,
-        tags: serde_json::from_str(&tags).unwrap_or_default(),
-        inline_tags: serde_json::from_str(&r.get::<_, String>(10)?).unwrap_or_default(),
-        body: r.get(5)?,
-        path: r.get(6)?,
-        created: r.get(7)?,
-        updated: r.get(8)?,
-        fields: serde_json::from_str(&fields).unwrap_or_default(),
+        title: r.get(2)?,
+        tags: serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default(),
+        inline_tags: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or_default(),
+        fields: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(),
+        body: r.get(6)?,
     })
 }
 
@@ -428,6 +316,9 @@ mod tests {
         rebuild_links(&tx).unwrap();
         tx.commit().unwrap();
     }
+    fn pairs(idx: &Index) -> Vec<(String, String)> {
+        idx.links().unwrap().into_iter().map(|l| (l.source, l.target)).collect()
+    }
 
     #[test]
     fn fts_query_is_safe() {
@@ -437,76 +328,52 @@ mod tests {
     }
 
     #[test]
-    fn search_any_matches_questions() {
+    fn search_ranks_file_name_first() {
         let mut idx = Index::memory().unwrap();
-        add(&mut idx, "notes/Docker.md", "---\nid: d\n---\nContainers per team");
-        add(&mut idx, "notes/Other.md", "---\nid: o\n---\nNothing here");
-        assert!(idx.search("how do I isolate containers", 5).unwrap().is_empty(), "AND fails on questions");
-        assert_eq!(idx.search_any("how do I isolate containers?", 5).unwrap()[0].id, "d");
-        assert!(fts_query_any("what is the").is_none());
-    }
-
-    #[test]
-    fn search_ranks_title_first() {
-        let mut idx = Index::memory().unwrap();
-        add(&mut idx, "notes/Writeup JWT.md", "---\nid: a\ntitle: 'Writeup: JWT none-alg bypass'\ntags: [ctf]\n---\nSigned tokens.");
-        add(&mut idx, "notes/Other.md", "---\nid: b\n---\nmentions jwt once in the body");
-        add(&mut idx, "links/X.md", "---\nid: c\nurl: https://jwt.io\nsummary: token debugger\n---\n");
+        add(&mut idx, "CTF/Writeup JWT.md", "---\ntags: [ctf]\n---\nSigned tokens.");
+        add(&mut idx, "Other.md", "mentions jwt once in the body");
+        add(&mut idx, "Links/X.md", "---\nurl: https://jwt.io\n---\n");
         let hits = idx.search("jwt", 10).unwrap();
-        assert_eq!(hits.iter().map(|h| h.id.as_str()).collect::<Vec<_>>()[0], "a");
-        assert_eq!(hits.len(), 3, "matches title, body and fields");
-        assert_eq!(idx.search("wri jw", 10).unwrap()[0].id, "a", "prefix + AND");
+        assert_eq!(hits[0].id, "CTF/Writeup JWT.md");
+        assert_eq!(hits.len(), 3, "matches name, body and properties");
+        assert_eq!(idx.search("wri jw", 10).unwrap()[0].id, "CTF/Writeup JWT.md", "prefix + AND");
         assert!(idx.search("body", 10).unwrap()[0].snippet.contains('\u{1}'));
         assert!(idx.search("nothing-here", 10).unwrap().is_empty());
     }
 
     #[test]
-    fn links_resolve_by_title_stem_or_path() {
+    fn links_resolve_like_obsidian() {
         let mut idx = Index::memory().unwrap();
-        add(&mut idx, "notes/A.md", "---\nid: a\n---\n[[b title]] [[notes/C]] [[C.md]] [[missing]]");
-        add(&mut idx, "notes/B.md", "---\nid: b\ntitle: B title\n---\n");
-        add(&mut idx, "notes/C.md", "---\nid: c\n---\n[[A|alias]]");
-        let links = idx.links().unwrap();
-        let pairs: Vec<_> = links.iter().map(|l| (l.source.as_str(), l.target.as_str())).collect();
-        assert_eq!(pairs, vec![("a", "b"), ("a", "c"), ("c", "a")]);
+        add(&mut idx, "A.md", "[[b]] [[Deep/C]] [[C.md]] [[missing]] [[A]] [[B#Heading|x]]");
+        add(&mut idx, "Folder/B.md", "---\ntitle: Something else\n---\n");
+        add(&mut idx, "Deep/C.md", "[[A|alias]]");
+        assert_eq!(pairs(&idx), vec![("A.md".into(), "Deep/C.md".into()), ("A.md".into(), "Folder/B.md".into()), ("Deep/C.md".into(), "A.md".into())]);
+        // same name in two folders: the shallower one wins a bare [[Name]]
+        add(&mut idx, "X/Y/Dup.md", "");
+        add(&mut idx, "X/Dup.md", "");
+        add(&mut idx, "Uses dup.md", "[[Dup]] [[X/Y/Dup]]");
+        let from: Vec<String> = pairs(&idx).into_iter().filter(|(s, _)| s == "Uses dup.md").map(|(_, t)| t).collect();
+        assert_eq!(from, vec!["X/Dup.md", "X/Y/Dup.md"]);
     }
 
     #[test]
-    fn embeddings_round_trip_and_prune() {
+    fn property_links_and_aliases_count() {
         let mut idx = Index::memory().unwrap();
-        add(&mut idx, "notes/A.md", "---\nid: a\n---\n");
-        idx.set_embedding("a", "m", "h1", &[0.5, -1.0, 2.25]).unwrap();
-        idx.set_embedding("gone", "m", "h2", &[1.0, 0.0, 0.0]).unwrap();
-        assert_eq!(idx.embeddings("m").unwrap(), vec![("a".to_string(), vec![0.5, -1.0, 2.25])]);
-        assert_eq!(idx.embeddings("other").unwrap().len(), 0);
-        assert_eq!(idx.embedding_hashes("m").unwrap().len(), 2);
-        assert_eq!(idx.prune_embeddings().unwrap(), 1);
-        idx.clear(false).unwrap();
-        assert_eq!(idx.embedding_hashes("m").unwrap().len(), 1, "rebuild keeps vectors");
-        idx.clear(true).unwrap();
-        assert!(idx.embedding_hashes("m").unwrap().is_empty());
-    }
-
-    #[test]
-    fn frontmatter_links_count() {
-        let mut idx = Index::memory().unwrap();
-        add(&mut idx, "skills/Rust.md", "---\nid: s\nused_in: ['[[Brain]]', '[[Missing]]']\n---\n");
-        add(&mut idx, "projects/Brain.md", "---\nid: p\n---\n");
-        let links = idx.links().unwrap();
-        assert_eq!(links.iter().map(|l| (l.source.as_str(), l.target.as_str())).collect::<Vec<_>>(), vec![("s", "p")]);
+        add(&mut idx, "Rust.md", "---\nused_in: ['[[Brain]]', '[[Missing]]']\n---\n[[the brain]]");
+        add(&mut idx, "Brain.md", "---\naliases: [the brain]\n---\n");
+        assert_eq!(pairs(&idx), vec![("Rust.md".into(), "Brain.md".into())]);
     }
 
     #[test]
     fn remove_cascades() {
         let mut idx = Index::memory().unwrap();
-        add(&mut idx, "notes/A.md", "---\nid: a\ntags: [x]\n---\n[[B]]");
-        add(&mut idx, "notes/B.md", "---\nid: b\n---\n");
-        remove_path(idx.conn(), "notes/B.md").unwrap();
+        add(&mut idx, "A.md", "---\ntags: [x]\n---\n[[B]]");
+        add(&mut idx, "B.md", "");
+        remove_path(idx.conn(), "B.md").unwrap();
         assert!(idx.links().unwrap().is_empty());
-        assert!(idx.search("b", 5).unwrap().iter().all(|h| h.id != "b"));
         assert_eq!(idx.tags().unwrap(), vec![("x".to_string(), 1)]);
-        add(&mut idx, "notes/C.md", "---\nid: c\ntags: [x]\n---\nInline #y and #x");
+        add(&mut idx, "C.md", "---\ntags: [x]\n---\nInline #y and #x");
         assert_eq!(idx.tags().unwrap(), vec![("x".to_string(), 2), ("y".to_string(), 1)], "inline #tags count");
-        assert_eq!(idx.search("y", 5).unwrap()[0].id, "c");
+        assert_eq!(idx.search("y", 5).unwrap()[0].id, "C.md");
     }
 }

@@ -2,7 +2,7 @@
 // are rendered by a registered renderer; open tabs are remembered.
 
 import { app } from "../state.js";
-import { icon, typeIcon } from "../icons.js";
+import { icon, itemIcon } from "../icons.js";
 import { esc, setHtml } from "../util.js";
 import { prefs } from "../lib/prefs.js";
 import { right } from "./layout.js";
@@ -24,7 +24,7 @@ function titleOf(t) {
   if (t.kind !== "item") return { html: icon(t.iconName || "file", { size: 14 }), text: t.title || t.kind };
   const n = app.items.get(t.id);
   if (!n) return { html: icon("file", { size: 14 }), text: "Missing" };
-  return { html: typeIcon(n.type, app.lobeOf(n).color, 12), text: n.title };
+  return { html: itemIcon(n, app.colorOf(n)), text: n.title };
 }
 
 function renderBar() {
@@ -45,6 +45,13 @@ bar.addEventListener("click", e => {
   const t = tabs.find(x => x.key === tabEl.dataset.key);
   if (e.target.closest(".tab-close")) close(t);
   else activate(t);
+});
+bar.addEventListener("contextmenu", e => {
+  const tabEl = e.target.closest(".tab");
+  const t = tabEl && tabs.find(x => x.key === tabEl.dataset.key);
+  if (t?.kind !== "item") return;
+  e.preventDefault();
+  app.emit("file-menu", { id: t.id, at: { x: e.clientX, y: e.clientY } });
 });
 bar.addEventListener("auxclick", e => {
   const tabEl = e.target.closest(".tab");
@@ -108,14 +115,26 @@ export const tabsApi = {
     renderBar();
   },
   restore() {
-    for (const id of prefs.get("tabs.open", [])) if (app.items.has(id)) tabsApi.openItem(id, { background: true });
+    // read the active tab first: reopening the others saves prefs again
     const key = prefs.get("tabs.active", "graph");
+    for (const id of prefs.get("tabs.open", [])) if (app.items.has(id)) tabsApi.openItem(id, { background: true });
     activate(tabs.find(t => t.key === key) || tabs[0]);
   },
   rect: () => panes.getBoundingClientRect(),
   // Flush every open editor's pending autosave (before quit, rename, ...).
   saveAll: () => Promise.all(tabs.map(t => t.view.save?.())).catch(() => {}),
 };
+
+// Files that moved (rename, move, folder rename): their tabs follow.
+app.on("moved", pairs => {
+  const to = new Map(pairs);
+  for (const t of tabs)
+    if (t.kind === "item" && to.has(t.id)) {
+      t.id = to.get(t.id);
+      t.key = `item:${t.id}`;
+    }
+  save();
+});
 
 function activate(t) {
   if (!t) return;

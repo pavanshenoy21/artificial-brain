@@ -2,10 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { wikilinks, renameWikilinks, fileStem, linkIndex, resolve } from "../src/lib/wikilinks.js";
-import { fuzzy, blend } from "../src/lib/rank.js";
-import { lobeCenters } from "../src/lib/lobes.js";
-import { parseTasks, toggleTask, dueBucket, addDays, openTasks } from "../src/lib/tasks.js";
-import { parseCards, cardKey, schedule, queue, allCards, spanLabel } from "../src/lib/srs.js";
+import { fuzzy } from "../src/lib/rank.js";
+import { colorScheme, lobeCenters, lobeOf, groupOf, folderOf, LOBE_PALETTE, GROUP_PALETTE } from "../src/lib/folders.js";
+import { toggleTask, addDays, today } from "../src/lib/tasks.js";
 import { unlinkedMentions, linkMention, namesOf } from "../src/lib/mentions.js";
 import { anchor, nearestSide, facingSide, edgePath, fitView, bounds, inside, drawOrder, normalize, colorOf } from "../src/canvas/model.js";
 
@@ -25,19 +24,59 @@ test("fileStem matches the Rust rules", () => {
   assert.equal(fileStem("  ..  "), "Untitled");
 });
 
-test("link index resolves by title, file name and path", () => {
-  const idx = linkIndex([
-    { id: "a", title: "Writeup: JWT", path: "notes/Writeup JWT.md" },
-    { id: "b", title: "B", path: "skills/B.md" },
-  ]);
-  assert.equal(resolve(idx, "writeup: jwt"), "a");
-  assert.equal(resolve(idx, "Writeup JWT"), "a");
-  assert.equal(resolve(idx, "skills/B"), "b");
-  assert.equal(resolve(idx, "B.md"), "b");
+test("link index resolves like Obsidian: file name, path, aliases; shallowest wins", () => {
+  const n = (path, props) => ({ id: path, path, title: path.split("/").pop().replace(/\.md$/, ""), props });
+  const idx = linkIndex([n("CTF/Writeup JWT.md"), n("Skills/B.md"), n("Commands/Git.md", { aliases: ["git cheatsheet"] }), n("B2.md", { alias: "Git" })]);
+  assert.equal(resolve(idx, "Writeup JWT"), "CTF/Writeup JWT.md");
+  assert.equal(resolve(idx, "skills/b"), "Skills/B.md");
+  assert.equal(resolve(idx, "B.md"), "Skills/B.md");
   assert.equal(resolve(idx, "nope"), undefined);
-  const withAlias = linkIndex([{ id: "g", title: "Git", path: "Commands/Git.md", aliases: ["git cheatsheet"] }, { id: "b", title: "B", path: "B.md", alias: "Git" }]);
-  assert.equal(resolve(withAlias, "Git cheatsheet"), "g");
-  assert.equal(resolve(withAlias, "git"), "g", "a real title beats another note's alias");
+  assert.equal(resolve(idx, "Git cheatsheet"), "Commands/Git.md");
+  assert.equal(resolve(idx, "git"), "Commands/Git.md", "a real file name beats another note's alias");
+  const dup = linkIndex([n("X/Y/Dup.md"), n("X/Dup.md")]);
+  assert.equal(resolve(dup, "Dup"), "X/Dup.md");
+  assert.equal(resolve(dup, "X/Y/Dup"), "X/Y/Dup.md");
+});
+
+test("folders: lobes, groups and colours (picked or from the palettes)", () => {
+  assert.equal(lobeOf("Coding Club/CTF/Writeup.md"), "Coding Club");
+  assert.equal(lobeOf("Root.md"), null);
+  assert.equal(groupOf("Coding Club/CTF/2026/Writeup.md"), "Coding Club/CTF");
+  assert.equal(groupOf("Coding Club/Overview.md"), null);
+  assert.equal(folderOf("A/B/c.md"), "A/B");
+  const folders = ["Coding Club", "Coding Club/CTF", "Coding Club/CTF/2026", "Coding Club/Hackathons", "College", "College/Sem 3"];
+  const c = colorScheme(folders, { folders: { "Coding Club/Hackathons": "#123456" } }, "#888");
+  assert.equal(c.lobe("Coding Club"), LOBE_PALETTE[0]);
+  assert.equal(c.lobe("College"), LOBE_PALETTE[1]);
+  assert.equal(c.note("Coding Club/CTF/Writeup.md"), GROUP_PALETTE[0]);
+  assert.equal(c.note("Coding Club/CTF/2026/Deep.md"), GROUP_PALETTE[0], "deeper folders inherit their group's colour");
+  assert.equal(c.note("Coding Club/Hackathons/Hack night.md"), "#123456", "picked colours win");
+  assert.notEqual(c.note("College/Sem 3/OS.md"), c.note("Coding Club/CTF/x.md"), "groups never share an automatic colour");
+  assert.equal(c.note("Coding Club/Overview.md"), LOBE_PALETTE[0], "loose notes in a lobe take its colour");
+  assert.equal(c.note("Root.md"), "#888");
+  assert.equal(c.picked("Coding Club/Hackathons"), "#123456");
+  assert.equal(c.picked("College"), null);
+});
+
+test("lobe centres fill a disc: biggest lobe in the middle, all distinct", () => {
+  const counts = new Map([["Big", 30], ["Mid", 10], ["Small", 2], ["", 1]]);
+  const c = lobeCenters(["Small", "Big", "Mid", ""], counts);
+  assert.deepEqual(c.get("Big").slice(0, 2), [0, 0]);
+  const keys = [...c.values()].map(v => v.slice(0, 2).map(x => x.toFixed(1)).join(","));
+  assert.equal(new Set(keys).size, 4);
+  const r = id => Math.hypot(c.get(id)[0], c.get(id)[1]);
+  assert.ok(r("Mid") < r("Small"));
+});
+
+test("tasks: toggling flips only the checkbox", () => {
+  const body = "Intro\n- [ ] OS assignment\n  * [x] read ch. 3\n1. [ ] lab record";
+  assert.equal(toggleTask(body, 1).split("\n")[1], "- [x] OS assignment");
+  assert.equal(toggleTask(toggleTask(body, 1), 1), body);
+  assert.equal(toggleTask(body, 2).split("\n")[2], "  * [ ] read ch. 3");
+  assert.equal(toggleTask(body, 0), body, "non-task lines are left alone");
+  assert.equal(toggleTask("- [ ] a\r\n- [ ] b", 0), "- [x] a\r\n- [ ] b", "CRLF kept");
+  assert.equal(addDays("2026-12-30", 3), "2027-01-02");
+  assert.match(today(), /^\d{4}-\d{2}-\d{2}$/);
 });
 
 test("fuzzy: subsequence with word-start bonus", () => {
@@ -47,39 +86,6 @@ test("fuzzy: subsequence with word-start bonus", () => {
   assert.ok(a && !b);
   assert.ok(fuzzy("New note", "nn").score > fuzzy("Clear graph focus", "nn")?.score || !fuzzy("Clear graph focus", "nn"));
 });
-
-test("blend: both signals beat one; weak semantic-only hits are dropped", () => {
-  const out = blend(
-    [{ id: "a", score: 10, snippet: "" }, { id: "b", score: 9, snippet: "" }],
-    [{ id: "b", score: 0.9 }, { id: "c", score: 0.8 }, { id: "d", score: 0.1 }],
-  );
-  assert.deepEqual(out.map(x => x.id), ["b", "a", "c"]);
-});
-
-test("lobe centres fill a disc: biggest lobe in the middle, all distinct", () => {
-  const lobes = Array.from({ length: 12 }, (_, i) => ({ id: `l${i}` }));
-  const counts = new Map(lobes.map((l, i) => [l.id, i + 1]));
-  const c = lobeCenters(lobes, counts);
-  assert.deepEqual(c.get("l11").slice(0, 2), [0, 0], "largest at the centre");
-  const r = id => Math.hypot(...c.get(id).slice(0, 2));
-  assert.ok(r("l10") < r("l0"), "bigger lobes closer to the middle");
-  const xy = [...c.values()].map(p => p.slice(0, 2).map(Math.round).join());
-  assert.equal(new Set(xy).size, 13, "12 lobes + Unsorted, no overlaps");
-  for (const a of c.values()) for (const b of c.values())
-    if (a !== b) assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) > 30, "centres keep some room");
-});
-
-test("tag similarity stays fast on a big vault and skips pairs already linked", async () => {
-  const { similarityLinks } = await import("../src/data/similar.js");
-  const nodes = Array.from({ length: 3000 }, (_, i) => ({ id: `n${i}`, tags: [`t${i % 150}`, `t${(i * 7) % 150}`, "common"], inline_tags: [] }));
-  const t0 = performance.now();
-  const out = similarityLinks(nodes, [{ source: "n0", target: "n150" }]);
-  assert.ok(performance.now() - t0 < 1500, `took ${performance.now() - t0}ms`);
-  assert.ok(out.length > 0 && out.length <= 6000);
-  assert.ok(!out.some(l => [l.source, l.target].sort().join() === "n0,n150"));
-  assert.equal(similarityLinks(nodes, [{ source: "n0", target: "n150" }]), out, "cached when nothing changed");
-});
-
 
 test("canvas geometry: anchors, sides, edges, fitting", () => {
   const a = { x: 0, y: 0, width: 100, height: 50 }, b = { x: 300, y: 0, width: 100, height: 50 };
@@ -115,61 +121,8 @@ test("canvas model: groups, order, normalize, colours", () => {
   assert.equal(colorOf("nope"), null);
 });
 
-test("tasks: parse, due dates, toggle only the checkbox", () => {
-  const body = "Intro\n- [ ] OS assignment 📅 2026-10-10\n  * [x] read ch. 3\n1. [ ] lab record due: 2026-10-08\n```\n- [ ] not a task\n```\n- [ ]\n- [ ] call @2026-11-01 mom";
-  const t = parseTasks(body);
-  assert.deepEqual(t.map(x => [x.line, x.done, x.text, x.due]), [
-    [1, false, "OS assignment", "2026-10-10"],
-    [2, true, "read ch. 3", null],
-    [3, false, "lab record", "2026-10-08"],
-    [8, false, "call mom", "2026-11-01"],
-  ]);
-  const flipped = toggleTask(body, 1);
-  assert.equal(flipped.split("\n")[1], "- [x] OS assignment 📅 2026-10-10");
-  assert.equal(toggleTask(flipped, 1), body);
-  assert.equal(toggleTask(body, 0), body, "non-task lines are left alone");
-  assert.equal(toggleTask("- [ ] a\r\n- [ ] b", 0), "- [x] a\r\n- [ ] b", "CRLF kept");
-  assert.equal(dueBucket("2026-10-07", "2026-10-08"), "overdue");
-  assert.equal(dueBucket("2026-10-08", "2026-10-08"), "today");
-  assert.equal(dueBucket("2026-10-15", "2026-10-08"), "soon");
-  assert.equal(dueBucket("2026-12-01", "2026-10-08"), "later");
-  assert.equal(addDays("2026-12-30", 3), "2027-01-02");
-  const open = openTasks([{ id: "a", type: "note", body }, { id: "c", type: "canvas", body: "- [ ] x" }]);
-  assert.deepEqual(open.map(x => x.text), ["lab record", "OS assignment", "call mom"]);
-});
-
-test("flashcards: parse, keys, SM-2 schedule, queue", () => {
-  const body = "# OS\n- What is a page fault? :: access to a page not in RAM\nplain line\n`a :: b` in code\n```\nx :: y\n```\nEmpty :: \nTCP vs UDP? :: reliable stream vs datagrams";
-  const cards = parseCards(body);
-  assert.deepEqual(cards.map(c => [c.line, c.q, c.a]), [[1, "What is a page fault?", "access to a page not in RAM"], [8, "TCP vs UDP?", "reliable stream vs datagrams"]]);
-  assert.equal(cardKey("n1", "TCP vs UDP?"), cardKey("n1", "  tcp  vs udp? "));
-  assert.notEqual(cardKey("n1", "TCP vs UDP?"), cardKey("n2", "TCP vs UDP?"));
-
-  const now = "2026-10-08";
-  let s = schedule(undefined, 3, now);
-  assert.deepEqual([s.interval, s.due, s.reps], [1, "2026-10-09", 1]);
-  s = schedule(s, 3, "2026-10-09");
-  assert.equal(s.interval, 3);
-  s = schedule(s, 3, "2026-10-12");
-  assert.equal(s.interval, 8); // 3 * 2.5 rounded
-  const lapse = schedule(s, 1, "2026-10-20");
-  assert.deepEqual([lapse.interval, lapse.reps, lapse.lapses], [1, 0, 1]);
-  assert.ok(lapse.ease < s.ease);
-  assert.equal(schedule(undefined, 4, now).interval, 4);
-  assert.ok(schedule(s, 4, now).interval > schedule(s, 3, now).interval);
-  assert.ok(schedule(s, 2, now).interval < schedule(s, 3, now).interval);
-  assert.equal(spanLabel(3), "3d");
-  assert.equal(spanLabel(30), "4w");
-  assert.equal(spanLabel(400), "1.1y");
-
-  const all = allCards([{ id: "n", type: "note", body }]);
-  const st = { cards: { [all[0].key]: { due: "2026-10-01" } } };
-  assert.deepEqual(queue(all, st, now).map(c => c.q), ["What is a page fault?", "TCP vs UDP?"]);
-  assert.deepEqual(queue(all, { cards: { [all[0].key]: { due: "2026-10-30" } }, newDay: now, newCount: 20 }, now), []);
-});
-
 test("unlinked mentions: whole words, not in links or code; linking keeps the text", () => {
-  const target = { id: "d", title: "Docker", path: "skills/Docker.md", aliases: ["containers"] };
+  const target = { id: "d", title: "Docker", path: "skills/Docker.md", props: { aliases: ["containers"] } };
   const items = [
     target,
     { id: "a", body: "We ran docker compose and Docker again." },

@@ -3,7 +3,7 @@
 
 import { app } from "../state.js";
 import { isDesktop } from "../api.js";
-import { newItem, importSample, openVaultFolder } from "../actions.js";
+import { newNote, importSample, openVaultFolder } from "../actions.js";
 import { esc } from "../util.js";
 
 export function initEmptyState(pane, getInfo) {
@@ -34,7 +34,7 @@ export function initEmptyState(pane, getInfo) {
 
   el.addEventListener("click", e => {
     const act = e.target.closest("[data-act]")?.dataset.act;
-    if (act === "new") newItem("note");
+    if (act === "new") newNote();
     if (act === "sample") importSample();
     if (act === "open") openVaultFolder();
   });

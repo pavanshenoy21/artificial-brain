@@ -1,60 +1,75 @@
-// The mock backend must behave like the Rust store (same API, same link rules).
+// The browser preview's mock backend must behave like the Rust store.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createMockBackend } from "../src/mock/backend.js";
 
-test("sample seed: items and wikilink-derived links", async () => {
+test("sample vault: folders, notes, a canvas and wikilink-derived links", async () => {
   const api = createMockBackend();
   const g = await api.loadGraph();
-  assert.equal(g.nodes.length, 73);
-  assert.equal(g.links.length, 73); // 69 between notes + 4 from the sample canvas to the notes on it
   assert.equal(g.nodes.filter(n => n.type === "canvas").length, 1);
-  assert.equal(g.lobes.length, 6);
+  assert.ok(g.nodes.length > 30);
+  assert.ok(g.folders.includes("Coding Club") && g.folders.includes("Coding Club/CTF"));
+  assert.ok(g.links.some(l => l.source === "Coding Club/CTF/CTFd setup.md" && l.target === "Learning/Linux/Docker.md"));
+  const hack = g.nodes.find(n => n.id === "Coding Club/Hackathons/Hack Night 2026.md");
+  assert.deepEqual(hack.props, { date: "2026-03-14", role: "Builder" });
+  assert.deepEqual(hack.inline_tags, ["hackathon"]);
 });
 
-test("create / rename rewrites links / delete", async () => {
+test("notes: Untitled names, folders, rename rewrites links", async () => {
   const api = createMockBackend({ seed: false });
-  const a = await api.createItem({ title: "Alpha", body: "See [[Beta]]" });
-  const b = await api.createItem({ title: "Beta", type: "skill" });
-  assert.equal(b.path, "skills/Beta.md");
-  let g = await api.loadGraph();
-  assert.deepEqual(g.links, [{ source: a.id, target: b.id, kind: "explicit" }]);
-  await api.updateItem(b.id, { title: "Gamma: two" });
-  assert.equal((await api.getItem(a.id)).body, "See [[Gamma two]]");
-  await api.deleteItem(b.id);
-  g = await api.loadGraph();
-  assert.equal(g.links.length, 0);
-  await assert.rejects(api.createItem({ title: " " }));
-  await assert.rejects(api.createItem({ title: "x", type: "nope" }));
+  const a = await api.createItem({});
+  const b = await api.createItem({});
+  assert.deepEqual([a.id, b.id], ["Untitled.md", "Untitled 1.md"]);
+  const docker = await api.createItem({ title: "Docker", folder: "Tools" });
+  const n = await api.createItem({ title: "A", body: "[[Docker]] [[Docker#Volumes|vols]] [[Tools/Docker]]" });
+  await assert.rejects(api.createItem({ folder: "../x" }), /bad path/);
+  const r = await api.updateItem(docker.id, { title: "Containers" });
+  assert.equal(r.id, "Tools/Containers.md");
+  assert.equal((await api.getItem(n.id)).body, "[[Containers]] [[Containers#Volumes|vols]] [[Tools/Containers]]");
+  const g = await api.loadGraph();
+  assert.deepEqual(g.links, [{ source: "A.md", target: "Tools/Containers.md" }]);
+  await api.updateItem(n.id, { tags: ["x"], props: { status: "draft" } });
+  assert.deepEqual((await api.getItem(n.id)).props, { status: "draft" });
+  await api.updateItem(n.id, { props: { status: null } });
+  assert.deepEqual((await api.getItem(n.id)).props, {});
+  await assert.rejects(api.updateItem(n.id, { status: "x" }), /props/);
+  await api.deleteItem(n.id);
+  assert.equal(await api.getItem(n.id), null);
 });
 
-test("search: prefix AND match, title first, snippet markers", async () => {
+test("folders: create, rename/move with links and colours, move files, delete", async () => {
+  const api = createMockBackend({ seed: false });
+  await api.createFolder("Uni/Empty");
+  await assert.rejects(api.createFolder("Uni/Empty"), /exists/);
+  const os = await api.createItem({ title: "OS", folder: "Uni/Sem 3" });
+  const idx = await api.createItem({ title: "Index", body: "[[Uni/Sem 3/OS]] and [[OS]]" });
+  await api.setFolderColor("Uni/Sem 3", "#E06C75");
+  assert.deepEqual((await api.loadGraph()).folders, ["Uni", "Uni/Empty", "Uni/Sem 3"]);
+  const moved = await api.renameFolder("Uni/Sem 3", "College/Sem 3");
+  assert.deepEqual(moved, [[os.id, "College/Sem 3/OS.md"]]);
+  assert.equal((await api.getItem(idx.id)).body, "[[College/Sem 3/OS]] and [[OS]]");
+  assert.equal((await api.loadGraph()).colors.folders["College/Sem 3"], "#e06c75");
+  await assert.rejects(api.renameFolder("College", "College/in"), /itself/);
+  assert.deepEqual(await api.moveItem("College/Sem 3/OS.md", ""), [["College/Sem 3/OS.md", "OS.md"]]);
+  assert.equal((await api.getItem(idx.id)).body, "[[OS]] and [[OS]]");
+  await api.deleteFolder("Uni");
+  assert.ok(!(await api.loadGraph()).folders.some(f => f.startsWith("Uni")));
+  await assert.rejects(api.setFolderColor("College", "red"), /not a colour/);
+});
+
+test("search: prefix AND match, file name first, snippet markers", async () => {
   const api = createMockBackend();
-  const hits = await api.search("jw wri");
-  const g = await api.loadGraph();
-  assert.equal(g.nodes.find(n => n.id === hits[0].id).title, "Writeup: JWT none-alg bypass");
-  const body = await api.search("nginx");
-  assert.ok(body[0].snippet.includes("\u0001nginx\u0002"));
+  const hits = await api.search("chall des");
+  assert.equal(hits[0].id, "Coding Club/CTF/Challenge design checklist.md");
+  assert.ok((await api.search("volume"))[0].snippet.includes("\u0001"));
   assert.deepEqual(await api.search("   "), []);
 });
 
-test("frontmatter [[links]] (used_in) become graph links and follow renames", async () => {
+test("canvases: create in a folder, save, rename keeps links and file cards in step", async () => {
   const api = createMockBackend({ seed: false });
-  const p = await api.createItem({ type: "project", title: "Brain" });
-  const s = await api.createItem({ type: "skill", title: "Rust", used_in: ["[[Brain]]"] });
-  let g = await api.loadGraph();
-  assert.deepEqual(g.links, [{ source: s.id, target: p.id, kind: "explicit" }]);
-  await api.updateItem(p.id, { title: "Artificial Brain" });
-  assert.deepEqual((await api.getItem(s.id)).used_in, ["[[Artificial Brain]]"]);
-  g = await api.loadGraph();
-  assert.equal(g.links.length, 1);
-});
-
-test("canvases: create, save, rename keeps links and file cards in step", async () => {
-  const api = createMockBackend({ seed: false });
-  const note = await api.createItem({ title: "Docker", type: "skill" });
-  const c = await api.createCanvas("Board");
-  assert.equal(c.id, "canvases/Board.canvas");
+  const note = await api.createItem({ title: "Docker" });
+  const c = await api.createCanvas("Board", "Plans");
+  assert.equal(c.id, "Plans/Board.canvas");
   assert.deepEqual(await api.getCanvas(c.id), { nodes: [], edges: [] });
   await api.saveCanvas(c.id, {
     nodes: [
@@ -64,21 +79,16 @@ test("canvases: create, save, rename keeps links and file cards in step", async 
     edges: [{ id: "e", fromNode: "a", toNode: "b" }],
   });
   await assert.rejects(api.saveCanvas(c.id, { nodes: [{ id: "x" }] }), /id and a type/);
-  await assert.rejects(api.saveCanvas(c.id, { nodes: [], edges: [{ fromNode: "a", toNode: "z" }] }), /fromNode and toNode/);
   await assert.rejects(api.updateItem(c.id, { tags: ["x"] }), /only its name/);
   const other = await api.createItem({ title: "Index", body: "[[Board.canvas]]" });
   let g = await api.loadGraph();
   assert.ok(g.links.some(l => l.source === c.id && l.target === note.id));
   assert.ok(g.links.some(l => l.source === other.id && l.target === c.id));
-
   await api.updateItem(note.id, { title: "Containers" });
   const d = await api.getCanvas(c.id);
-  assert.equal(d.nodes[1].file, "skills/Containers.md");
+  assert.equal(d.nodes[1].file, "Containers.md");
   assert.equal(d.nodes[0].text, "see [[Containers]]");
-
-  const r = await api.updateItem(c.id, { title: "Sprint board" });
-  assert.equal(r.id, "canvases/Sprint board.canvas");
-  assert.equal((await api.getItem(other.id)).body, "[[Sprint board.canvas]]");
-  g = await api.loadGraph();
-  assert.ok(g.links.some(l => l.source === other.id && l.target === r.id));
+  const r = await api.updateItem(c.id, { title: "Sprint" });
+  assert.equal(r.id, "Plans/Sprint.canvas");
+  assert.equal((await api.getItem(other.id)).body, "[[Sprint.canvas]]");
 });

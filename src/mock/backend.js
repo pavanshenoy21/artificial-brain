@@ -1,267 +1,222 @@
 // In-memory stand-in for the Rust backend, used when the page runs in a plain
 // browser (`npm run dev`, Playwright). Same method names and shapes as the
-// Tauri commands wrapped in api.js. Seeded from src/data/sample.js.
+// Tauri commands wrapped in api.js, same rules as store.rs: a note's id is its
+// path, its title is its file name, renames and moves rewrite links.
 
-import { LOBES, buildSampleGraph } from "../data/sample.js";
-import { TYPE } from "../lib/types.js";
+import { sampleFiles } from "../data/sample.js";
 import { fileStem, linkIndex, renameWikilinks, resolve, wikilinks } from "../lib/wikilinks.js";
 import { inlineTags, allTags } from "../lib/tags.js";
-import { importSampleCanvas } from "../data/sample-canvas.js";
 
-const MANAGED = new Set(["id", "path", "created", "updated", "degree", "inline_tags"]);
-const CORE = new Set(["id", "type", "lobe", "title", "tags", "inline_tags", "body", "path", "created", "updated"]);
 const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const IGNORED = new Set(["id", "path", "type", "title", "degree", "inline_tags"]);
+const folderOf = p => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
+const nameOf = p => p.split("/").pop();
+const stemOf = p => nameOf(p).replace(/\.(md|canvas)$/i, "");
+const extOf = p => (/\.canvas$/i.test(p) ? "canvas" : "md");
 
-export function normalizeUrl(text) {
-  if (/\s/.test(text)) return null;
-  let c = text;
-  if (!/^https?:\/\//.test(c)) {
-    if (!c.includes(".") || c.startsWith(".") || c.includes("://")) return null;
-    c = "https://" + c;
+// Same checks as store.rs safe_rel: no absolute paths, "..", or dot-folders.
+function safeRel(p) {
+  const parts = String(p ?? "").split(/[\\/]/).map(x => x.trim()).filter(Boolean);
+  if (!parts.length || parts.some(x => x.startsWith(".") || x.includes(":"))) throw new Error(`bad path "${p}"`);
+  return parts.join("/");
+}
+const folderArg = f => (f && String(f).trim() && String(f).trim() !== "/" ? safeRel(f) : "");
+
+// Tiny frontmatter reader for the sample files ("key: value", "[a, b]", "- item").
+function parseNote(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  const fields = {};
+  if (m) {
+    let list = null;
+    for (const line of m[1].split(/\r?\n/)) {
+      const item = /^\s*-\s+(.*)$/.exec(line);
+      if (item && list) { fields[list].push(item[1].trim()); continue; }
+      const kv = /^([^:#][^:]*):\s*(.*)$/.exec(line);
+      if (!kv) continue;
+      const [, k, v] = kv;
+      if (!v) { fields[k.trim()] = []; list = k.trim(); continue; }
+      list = null;
+      fields[k.trim()] = /^\[.*\]$/.test(v.trim()) ? v.trim().slice(1, -1).split(",").map(x => x.trim()).filter(Boolean) : v.trim();
+    }
   }
-  try {
-    const u = new URL(c);
-    return u.hostname.includes(".") || u.hostname === "localhost" ? u.href : null;
-  } catch {
-    return null;
-  }
+  const tags = [].concat(fields.tags ?? []).flatMap(t => String(t).split(/[,\s]+/)).map(t => t.replace(/^#+/, "")).filter(Boolean);
+  delete fields.tags;
+  return { fields, tags, body: (m ? text.slice(m[0].length) : text).replace(/^[\r\n]+/, "").trimEnd() };
 }
 
-// Mirrors settings.rs defaults.
-export const DEFAULT_SETTINGS = {
-  vault: "", theme: "dark",
-  ai: { provider: "", base_url: "", model: "", api_key: "" },
-  embed: { base_url: "", model: "", top_k: 3, min_score: 0.55 },
-  github: { token: "", auto_sync: true },
-  shortcuts: { capture: "CommandOrControl+Shift+Space" },
-};
-const now = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
-let seq = 0;
-// Deterministic within a page load, so the same sample gets the same ids after a
-// reload (restored tabs keep pointing at the right items).
-const newId = () => `m${(++seq).toString(36)}`;
+function canvasText(data) {
+  return (data.nodes || []).map(n =>
+    n.type === "text" ? (n.text || "").trim()
+    : n.type === "file" && n.file ? `[[${n.file}]]`
+    : n.type === "link" ? (n.url || "").trim()
+    : n.type === "group" ? (n.label || "").trim() : "").filter(Boolean).join("\n\n");
+}
+
+function validateCanvas(d) {
+  if (!d || typeof d !== "object" || Array.isArray(d)) throw new Error("a canvas must be a JSON object");
+  const ids = new Set();
+  for (const n of d.nodes || []) {
+    if (typeof n.id !== "string" || typeof n.type !== "string") throw new Error("every canvas node needs an id and a type");
+    if (ids.has(n.id)) throw new Error(`duplicate canvas node id "${n.id}"`);
+    ids.add(n.id);
+  }
+  for (const e of d.edges || []) if (!ids.has(e.fromNode) || !ids.has(e.toNode)) throw new Error("every canvas edge needs fromNode and toNode on this canvas");
+}
+
+export const DEFAULT_SETTINGS = { vault: "", theme: "dark" };
 
 export function createMockBackend({ seed = true } = {}) {
-  const items = new Map();
-  let lobes = LOBES.map(l => ({ ...l }));
-  // Settings survive reloads in the preview (like settings.json on desktop).
-  let settings = structuredClone(DEFAULT_SETTINGS);
+  const items = new Map();      // path -> { path, type, tags, body, fields, canvas? }
+  const folders = new Set();    // explicit folders (empty ones survive)
+  let colors = { folders: {} };
+  let settings = { ...DEFAULT_SETTINGS };
   try { Object.assign(settings, JSON.parse(localStorage.getItem("brain.mock.settings")) || {}); } catch {}
-  const history = [];   // originals kept by AI actions (.brain/history in the real app)
-  const needAi = () => { if (!settings.ai.provider) throw new Error("No AI provider set up (Settings → AI provider)."); };
   const listeners = new Set();
   const emit = kind => listeners.forEach(fn => fn({ kind }));
-  const eventListeners = new Map();
-  const emitEvent = (event, payload) => eventListeners.get(event)?.forEach(fn => fn(payload));
 
-  function uniquePath(type, title, selfId, folder) {
-    const dir = folder || TYPE[type]?.dir || "notes";
-    const ext = type === "canvas" ? "canvas" : "md";
-    const stem = fileStem(title);
-    const taken = new Set([...items.values()].filter(i => i.id !== selfId).map(i => i.path.toLowerCase()));
-    let p = `${dir}/${stem}.${ext}`;
-    for (let n = 2; taken.has(p.toLowerCase()); n++) p = `${dir}/${stem} ${n}.${ext}`;
-    return p;
-  }
-
-  // ---- canvases (mirrors canvas.rs): JSON kept as-is, body = searchable text
-  function canvasText(data) {
-    return (data.nodes || []).map(n =>
-      n.type === "text" ? (n.text || "").trim()
-      : n.type === "file" && n.file ? `[[${n.file}]]`
-      : n.type === "link" ? (n.url || "").trim()
-      : n.type === "group" ? (n.label || "").trim() : "").filter(Boolean).join("\n\n");
+  const addParents = p => { for (let f = folderOf(p); f; f = folderOf(f)) folders.add(f); };
+  function put(path, it) {
+    it.path = path;
+    items.set(path, it);
+    addParents(path);
+    return it;
   }
   function setCanvas(it, data) {
-    it.__canvas = structuredClone(data);
+    it.canvas = structuredClone(data);
     it.body = canvasText(data);
-    it.cards = (data.nodes || []).length;
   }
-  function validateCanvas(d) {
-    if (!d || typeof d !== "object" || Array.isArray(d)) throw new Error("a canvas must be a JSON object");
-    const ids = new Set();
-    for (const n of d.nodes || []) {
-      if (typeof n.id !== "string" || typeof n.type !== "string") throw new Error("every canvas node needs an id and a type");
-      if (ids.has(n.id)) throw new Error(`duplicate canvas node id "${n.id}"`);
-      ids.add(n.id);
-    }
-    for (const e of d.edges || []) if (!ids.has(e.fromNode) || !ids.has(e.toNode)) throw new Error("every canvas edge needs fromNode and toNode on this canvas");
+  function view(it) {
+    const props = structuredClone(it.fields || {});
+    if (it.type === "canvas") props.cards = (it.canvas.nodes || []).length;
+    return { id: it.path, type: it.type, title: stemOf(it.path), tags: [...(it.tags || [])], inline_tags: inlineTags(it.body), body: it.body, path: it.path, props };
   }
-  // after a rename: [[links]] everywhere, file cards and text cards in canvases
-  function rewriteAll(pairs, oldPath, newPath) {
-    const rn = t => pairs.reduce((b, [o, n]) => renameWikilinks(b, o, n), t);
-    for (const other of items.values()) {
-      if (other.type === "canvas") {
-        const d = other.__canvas;
-        let hit = false;
-        for (const n of d.nodes || []) {
-          if (n.type === "file" && n.file === oldPath) { n.file = newPath; hit = true; }
-          if (n.type === "text" && n.text) { const t = rn(n.text); if (t !== n.text) { n.text = t; hit = true; } }
-        }
-        if (hit) setCanvas(other, d);
-        continue;
-      }
-      other.body = rn(other.body);
-      for (const [k, v] of Object.entries(other))
-        if (!CORE.has(k) && Array.isArray(v)) other[k] = v.map(x => (typeof x === "string" ? rn(x) : x));
-        else if (!CORE.has(k) && typeof v === "string") other[k] = rn(v);
-    }
+  function uniquePath(dir, stem, ext, self) {
+    const taken = p => [...items.keys()].some(k => k.toLowerCase() === p.toLowerCase() && k !== self);
+    const at = s => (dir ? `${dir}/` : "") + `${s}.${ext}`;
+    let p = at(stem);
+    for (let n = 1; taken(p); n++) p = at(`${stem} ${n}`);
+    return p;
   }
-
-  function applyPatch(item, patch) {
-    for (const [k, v] of Object.entries(patch || {})) {
-      if (MANAGED.has(k)) continue;
-      if (k === "type") {
-        if (!TYPE[v]) throw new Error(`unknown type "${v}"`);
-        item.type = v;
-      } else if (k === "tags") {
-        const raw = Array.isArray(v) ? v : String(v ?? "").split(/[,\s]+/);
-        item.tags = [...new Set(raw.map(t => String(t).trim().replace(/^#+/, "")).filter(Boolean))];
-      } else if (k === "title") item.title = String(v ?? "").trim();
-      else if (k === "body") item.body = String(v ?? "").trimEnd();
-      else if (k === "lobe") item.lobe = v || null;
-      else if (v === null) delete item[k];
-      else item[k] = v;
-    }
-  }
-
   function links() {
-    const all = [...items.values()];
+    const all = [...items.values()].map(view);
     const idx = linkIndex(all);
     const out = [];
     const seen = new Set();
-    // links in the body and in frontmatter values (e.g. used_in: ["[[Project]]"]), like index.rs
-    const fieldText = it => Object.entries(it).filter(([k]) => !CORE.has(k)).map(([, v]) => [].concat(v).filter(x => typeof x === "string").join("\n")).join("\n");
-    for (const it of all)
+    const fieldText = it => Object.values(it.fields || {}).flatMap(v => [].concat(v)).filter(x => typeof x === "string").join("\n");
+    for (const it of items.values())
       for (const t of [...wikilinks(it.body), ...wikilinks(fieldText(it))]) {
         const target = resolve(idx, t);
-        const key = `${it.id}|${target}`;
-        if (target && target !== it.id && !seen.has(key)) {
+        const key = `${it.path}|${target}`;
+        if (target && target !== it.path && !seen.has(key)) {
           seen.add(key);
-          out.push({ source: it.id, target, kind: "explicit" });
+          out.push({ source: it.path, target });
         }
       }
-    return out;
+    return out.sort((a, b) => (a.source + a.target).localeCompare(b.source + b.target));
   }
-
-  const clone = x => structuredClone(x);
-  // what the backend returns for an item: plus its inline #tags (like vault.rs)
-  const view = it => {
-    const { __canvas, ...rest } = it;
-    return { ...structuredClone(rest), inline_tags: inlineTags(it.body) };
-  };
-  const tagsOf = it => allTags(view(it));
+  // After files moved: rewrite [[links]] (name pairs + path pairs) and canvas file cards.
+  function finishMoves(moves, pairs = []) {
+    for (const [o, n] of moves) {
+      if (o.endsWith(".md") && n.endsWith(".md")) pairs.push([o.slice(0, -3), n.slice(0, -3)]);
+      pairs.push([o, n]);
+    }
+    const rn = t => pairs.reduce((b, [o, n]) => renameWikilinks(b, o, n), t);
+    for (const it of items.values()) {
+      if (it.type === "canvas") {
+        let hit = false;
+        for (const n of it.canvas.nodes || []) {
+          const m = moves.find(([o]) => o === n.file);
+          if (n.type === "file" && m) { n.file = m[1]; hit = true; }
+          if (n.type === "text" && n.text) { const t = rn(n.text); if (t !== n.text) { n.text = t; hit = true; } }
+        }
+        if (hit) setCanvas(it, it.canvas);
+        continue;
+      }
+      it.body = rn(it.body);
+      for (const [k, v] of Object.entries(it.fields || {}))
+        it.fields[k] = Array.isArray(v) ? v.map(x => (typeof x === "string" ? rn(x) : x)) : typeof v === "string" ? rn(v) : v;
+    }
+  }
+  function move(from, to) {
+    const it = items.get(from);
+    items.delete(from);
+    put(to, it);
+  }
+  const normTags = v => [...new Set((Array.isArray(v) ? v : String(v ?? "").split(/[,\s]+/)).map(t => String(t).trim().replace(/^#+/, "")).filter(Boolean))];
+  // same as store.rs apply_patch: { tags?, body?, props?: { name: value | null } }
+  function applyPatch(it, patch) {
+    for (const [k, v] of Object.entries(patch || {})) {
+      if (k === "tags") it.tags = normTags(v);
+      else if (k === "body") it.body = String(v ?? "").trimEnd();
+      else if (k === "props") {
+        for (const [name, val] of Object.entries(v || {}))
+          if (name === "tags") it.tags = normTags(val);
+          else if (val === null) delete it.fields[name];
+          else it.fields[name] = val;
+      } else if (IGNORED.has(k)) continue;
+      else throw new Error(`unknown field "${k}" (properties go in props)`);
+    }
+  }
+  const must = id => { const it = items.get(id); if (!it) throw new Error(`no file "${id}"`); return it; };
 
   const api = {
     async loadGraph() {
-      return { nodes: [...items.values()].map(view), links: links(), lobes: clone(lobes) };
+      return { nodes: [...items.values()].map(view), folders: [...folders].sort(), links: links(), colors: structuredClone(colors) };
     },
     async getItem(id) {
       return items.has(id) ? view(items.get(id)) : null;
     },
-    async createItem(input) {
-      const t = now();
-      const { folder, ...rest } = input || {};
-      if (folder && (/(^|\/)\./.test(folder) || folder.startsWith("/"))) throw new Error(`bad folder "${folder}"`);
-      const item = { id: newId(), type: "note", lobe: null, title: "", tags: [], body: "", created: t, updated: t };
-      applyPatch(item, rest);
-      if (!item.title) throw new Error("title is required");
-      item.path = uniquePath(item.type, item.title, null, folder?.replace(/\/+$/, ""));
-      items.set(item.id, item);
+    async createItem(input = {}) {
+      const { folder, title, ...rest } = input;
+      const dir = folderArg(folder);
+      const path = uniquePath(dir, fileStem(String(title || "").trim() || "Untitled"), "md");
+      const it = put(path, { type: "note", tags: [], body: "", fields: {} });
+      applyPatch(it, rest);
       emit("items");
-      return view(item);
+      return view(it);
     },
-    async updateItem(id, patch) {
-      const item = items.get(id);
-      if (!item) throw new Error(`no item with id ${id}`);
-      if (item.type === "canvas") return renameCanvas(item, patch);
-      const oldTitle = item.title;
-      const oldPath = item.path;
-      const oldStem = item.path.split("/").pop().replace(/\.md$/, "");
-      applyPatch(item, patch);
-      if (!item.title) throw new Error("title can't be empty");
-      item.updated = now();
-      if (item.title !== oldTitle && fileStem(item.title) !== oldStem) {
-        const dir = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/")) : "";
-        item.path = uniquePath(item.type, item.title, id, dir || undefined);
-        const newStem = item.path.split("/").pop().replace(/\.md$/, "");
-        const pairs = [[oldStem, newStem], ...(oldTitle !== oldStem ? [[oldTitle, newStem]] : []),
-          [oldPath.replace(/\.md$/, ""), item.path.replace(/\.md$/, "")]];
-        rewriteAll(pairs, oldPath, item.path);
+    async updateItem(id, patch = {}) {
+      const it = must(id);
+      const { title, ...rest } = patch;
+      if (it.type === "canvas") {
+        if (Object.keys(rest).some(k => !IGNORED.has(k))) throw new Error("a canvas has no properties; only its name can change");
+      } else applyPatch(it, rest);
+      let path = id;
+      if (title !== undefined) {
+        const t = String(title).trim();
+        if (!t) throw new Error("the name can't be empty");
+        if (t !== stemOf(id)) {
+          const ext = extOf(id);
+          path = uniquePath(folderOf(id), fileStem(t), ext, id);
+          if (path !== id) {
+            move(id, path);
+            const pairs = ext === "md" ? [[stemOf(id), stemOf(path)]] : [[nameOf(id), nameOf(path)]];
+            finishMoves([[id, path]], pairs);
+          }
+        }
       }
       emit("items");
-      return view(item);
+      return view(items.get(path));
     },
-    async createCanvas(title) {
-      if (!String(title || "").trim()) throw new Error("title is required");
-      const path = uniquePath("canvas", title.trim());
-      const it = { id: path, type: "canvas", lobe: null, title: path.split("/").pop().replace(/\.canvas$/, ""), tags: [], path };
-      setCanvas(it, { nodes: [], edges: [] });
-      items.set(it.id, it);
-      emit("items");
-      return view(it);
-    },
-    async getCanvas(id) {
-      const it = items.get(id);
-      if (!it || it.type !== "canvas") throw new Error("not a canvas");
-      return structuredClone(it.__canvas);
-    },
-    async saveCanvas(id, data) {
-      const it = items.get(id);
-      if (!it || it.type !== "canvas") throw new Error("not a canvas");
-      validateCanvas(data);
-      setCanvas(it, data);
-      emit("canvas");
-      return view(it);
-    },
-    async getState(name) {
-      try { return JSON.parse(localStorage.getItem(`brain.mock.state.${name}`)); } catch { return null; }
-    },
-    async setState(name, value) {
-      try { localStorage.setItem(`brain.mock.state.${name}`, JSON.stringify(value)); } catch {}
-    },
-    fileUrl: () => null,
     async deleteItem(id) {
+      must(id);
       items.delete(id);
       emit("items");
     },
     async listTags() {
       const counts = new Map();
-      for (const it of items.values()) for (const t of tagsOf(it)) counts.set(t, (counts.get(t) || 0) + 1);
+      for (const it of items.values()) for (const t of allTags(view(it))) counts.set(t, (counts.get(t) || 0) + 1);
       return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
     },
-    async importSample() {
-      const { nodes, links: edges } = buildSampleGraph();
-      const idMap = new Map();
-      for (const n of nodes) {
-        const { id, ...rest } = n;
-        idMap.set(id, (await api.createItem(rest)).id);
-      }
-      const out = new Map();
-      for (const e of edges) {
-        const s = idMap.get(e.source), t = idMap.get(e.target);
-        if (!s || !t) continue;
-        const stem = items.get(t).path.split("/").pop().replace(/\.md$/, "");
-        out.set(s, [...(out.get(s) || []), `[[${stem}]]`]);
-      }
-      for (const [id, ls] of out) {
-        const it = items.get(id);
-        it.body = (it.body ? it.body + "\n\n" : "") + "Related: " + ls.join(", ");
-      }
-      await importSampleCanvas(api);
-      emit("items");
-      return idMap.size;
-    },
     async search(query, limit = 20) {
-      // Rough stand-in for the backend's FTS5 bm25: every word must prefix-match a word.
+      // Rough stand-in for FTS5 bm25: every word must prefix-match a word.
       const words = query.toLowerCase().split(/[^\p{L}\p{N}_'-]+/u).filter(Boolean);
       if (!words.length) return [];
       const hits = [];
       for (const it of items.values()) {
-        const fields = [
-          [it.title, 10], [tagsOf(it).join(" "), 4], [it.body, 1],
-          [Object.entries(it).filter(([k]) => !CORE.has(k)).map(([, v]) => [].concat(v).join(" ")).join(" "), 0.5],
-        ].map(([t, w]) => [String(t || "").toLowerCase(), w]);
+        const v = view(it);
+        const fields = [[v.title, 10], [allTags(v).join(" "), 4], [it.body, 1],
+          [Object.values(it.fields || {}).map(x => [].concat(x).join(" ")).join(" "), 0.5]].map(([t, w]) => [String(t || "").toLowerCase(), w]);
         let score = 0;
         const ok = words.every(w => {
           let best = 0;
@@ -275,26 +230,27 @@ export function createMockBackend({ seed = true } = {}) {
         const start = Math.max(0, at - 40);
         let snippet = (start ? "…" : "") + body.slice(start, start + 120) + (start + 120 < body.length ? "…" : "");
         snippet = snippet.replace(new RegExp(`(${words.map(escRe).join("|")})`, "gi"), "\u0001$1\u0002");
-        hits.push({ id: it.id, score, snippet });
+        hits.push({ id: it.path, score, snippet });
       }
       return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+    },
+    async importSample() {
+      let n = 0;
+      for (const f of sampleFiles()) {
+        const path = safeRel(f.path);
+        if (items.has(path)) continue;
+        if (extOf(path) === "canvas") {
+          const it = put(path, { type: "canvas", tags: [], body: "", fields: {} });
+          setCanvas(it, JSON.parse(f.content));
+        } else put(path, { type: "note", ...parseNote(f.content) });
+        n++;
+      }
+      emit("items");
+      return n;
     },
     async rebuildIndex() {
       emit("items");
       return { scanned: items.size, updated: items.size, removed: 0 };
-    },
-    async listLobes() {
-      return clone(lobes);
-    },
-    async saveLobes(next) {
-      const ids = new Set();
-      for (const l of next) {
-        if (!l.id?.trim() || !l.name?.trim()) throw new Error("every lobe needs an id and a name");
-        if (ids.has(l.id)) throw new Error(`duplicate lobe id "${l.id}"`);
-        ids.add(l.id);
-      }
-      lobes = clone(next);
-      emit("lobes");
     },
     async vaultInfo() {
       return { path: "~/Brain (browser preview)", items: items.size, error: null, mock: true };
@@ -305,130 +261,95 @@ export function createMockBackend({ seed = true } = {}) {
     async pickFolder() {
       return null;
     },
-    // Mirrors capture.rs, minus the network: the "fetch" finishes after a moment
-    // with the host as title (pages aren't fetched in the browser preview).
-    async capture(text) {
-      text = text.trim();
-      if (!text) throw new Error("nothing to save");
-      const url = normalizeUrl(text);
-      if (!url) {
-        const [first, ...rest] = text.split("\n");
-        return { item: await api.createItem({ type: "note", title: first.trim().slice(0, 80), body: rest.join("\n").trim() }), existing: false };
-      }
-      const dup = [...items.values()].find(i => i.url === url);
-      if (dup) return { item: clone(dup), existing: true };
-      const host = new URL(url).hostname.replace(/^www\./, "");
-      const item = await api.createItem({ type: "link", title: (host + new URL(url).pathname).replace(/\/$/, ""), url, site: host, status: "pending" });
-      setTimeout(() => {
-        const it = items.get(item.id);
-        if (!it) return;
-        Object.assign(it, { status: "ok", fetched: now(), summary: "Browser preview: pages aren't fetched here." });
-        emit("items");
-      }, 800);
-      return { item, existing: false };
-    },
-    async refetchLink(id) {
-      const it = items.get(id);
-      if (it) { it.status = "ok"; delete it.error; emit("items"); }
-    },
-    async openCapture() {
-      window.open("/capture.html", "capture", "width=480,height=120");
-    },
-    async hideCapture() {},
     async getSettings() {
-      return clone(settings);
+      return { ...settings };
     },
     async saveSettings(next) {
-      settings = clone(next);
+      settings = { vault: next.vault ?? "", theme: next.theme ?? "dark" };
       try { localStorage.setItem("brain.mock.settings", JSON.stringify(settings)); } catch {}
-      emitEvent("settings-changed", clone(settings));
-      return clone(settings);
+      return { ...settings };
     },
-    async testAi() {
-      return { ok: false, message: "Browser preview: no network calls. Test this in the desktop app." };
+    fileUrl: () => null,
+
+    // ---- canvases
+    async createCanvas(title, folder) {
+      const path = uniquePath(folderArg(folder), fileStem(String(title || "").trim() || "Untitled"), "canvas");
+      const it = put(path, { type: "canvas", tags: [], body: "", fields: {} });
+      setCanvas(it, { nodes: [], edges: [] });
+      emit("items");
+      return view(it);
     },
-    async testEmbed() {
-      return { ok: false, message: "Browser preview: no network calls. Test this in the desktop app." };
+    async getCanvas(id) {
+      const it = must(id);
+      if (it.type !== "canvas") throw new Error("not a canvas");
+      return structuredClone(it.canvas);
     },
-    async semanticSearch() {
-      return [];
+    async saveCanvas(id, data) {
+      const it = must(id);
+      if (it.type !== "canvas") throw new Error("not a canvas");
+      validateCanvas(data);
+      setCanvas(it, data);
+      emit("canvas");
+      return view(it);
     },
-    async embedStatus() {
-      return { state: settings.embed.base_url ? "idle" : "off", done: 0, total: 0, message: "" };
+
+    // ---- folders
+    async createFolder(path) {
+      const rel = safeRel(path);
+      if (folders.has(rel)) throw new Error(`"${rel}" already exists`);
+      folders.add(rel);
+      addParents(`${rel}/x`);
+      emit("folders");
+      return rel;
     },
-    async embedAll() {},
-    // Fake AI for the browser preview (enabled when a provider is picked in
-    // Settings): deterministic, never adds facts, good enough to exercise the UI.
-    async aiPolish(text) {
-      needAi();
-      return text.replace(/[ \t]{2,}/g, " ").replace(/\bteh\b/g, "the").replace(/(^|[.!?]\s+)([a-z])/g, (m, a, b) => a + b.toUpperCase());
+    async renameFolder(from, to) {
+      from = safeRel(from); to = safeRel(to);
+      if (!folders.has(from)) throw new Error(`no folder "${from}"`);
+      if (from === to) return [];
+      if (to.startsWith(`${from}/`)) throw new Error("a folder can't be moved into itself");
+      if (folders.has(to) && from.toLowerCase() !== to.toLowerCase()) throw new Error(`"${to}" already exists`);
+      const inside = [...items.keys()].filter(p => p.startsWith(`${from}/`));
+      const moves = inside.map(p => [p, to + p.slice(from.length)]);
+      for (const f of [...folders]) if (f === from || f.startsWith(`${from}/`)) { folders.delete(f); folders.add(to + f.slice(from.length)); }
+      addParents(`${to}/x`);
+      for (const [k, v] of Object.entries(colors.folders))
+        if (k === from || k.startsWith(`${from}/`)) { delete colors.folders[k]; colors.folders[to + k.slice(from.length)] = v; }
+      for (const [o, n] of moves) move(o, n);
+      finishMoves(moves);
+      emit("folders");
+      return moves;
     },
-    async aiSummarize(text) {
-      needAi();
-      const plain = text.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, t, a) => a || t).replace(/\s+/g, " ").trim();
-      return (plain.match(/^.*?[.!?](\s|$)/) || [plain])[0].trim();
+    async deleteFolder(path) {
+      const rel = safeRel(path);
+      if (!folders.has(rel)) throw new Error(`no folder "${rel}"`);
+      for (const p of [...items.keys()]) if (p.startsWith(`${rel}/`)) items.delete(p);
+      for (const f of [...folders]) if (f === rel || f.startsWith(`${rel}/`)) folders.delete(f);
+      emit("folders");
     },
-    async aiFillForm(kind, text) {
-      needAi();
-      const out = {};
-      const date = text.match(/\b(20\d\d-\d\d-\d\d)\b/);
-      if (kind === "hackathon" && date) out.date = date[1];
-      const level = text.match(/\b(beginner|intermediate|advanced)\b/i);
-      if (kind === "skill" && level) out.level = level[1].toLowerCase();
-      const stack = [...new Set((text.match(/\b(Rust|Python|JavaScript|Tauri|Docker|React|Flask|C\+\+)\b/g) || []))];
-      if ((kind === "hackathon" || kind === "project") && stack.length) out.stack = stack;
-      return out;
+    async moveItem(id, folder) {
+      must(id);
+      const dir = folderArg(folder);
+      if (folderOf(id) === dir) return [];
+      const dest = uniquePath(dir, stemOf(id), extOf(id));
+      move(id, dest);
+      const pairs = stemOf(id) !== stemOf(dest) ? [[stemOf(id), stemOf(dest)]] : [];
+      finishMoves([[id, dest]], pairs);
+      if (dir) folders.add(dir);
+      emit("items");
+      return [[id, dest]];
     },
-    async aiSuggest(id) {
-      needAi();
-      const it = items.get(id);
-      const words = new Set(`${it.title} ${it.body}`.toLowerCase().split(/[^\p{L}\p{N}+#-]+/u));
-      const all = [...new Set([...items.values()].flatMap(tagsOf))];
-      const tags = all.filter(t => words.has(t) && !tagsOf(it).includes(t)).slice(0, 3);
-      const lobe = lobes.find(l => l.name.toLowerCase().split(/[^a-z]+/).some(w => w.length > 2 && words.has(w)))?.id || null;
-      return { tags, lobe: lobe === it.lobe ? null : lobe };
+    async setFolderColor(folder, color) {
+      const f = safeRel(folder);
+      if (color == null) delete colors.folders[f];
+      else if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) colors.folders[f] = color.toLowerCase();
+      else throw new Error(`not a colour: "${color}"`);
+      emit("colors");
+      return structuredClone(colors);
     },
-    async aiApply(id, patch) {
-      history.push(clone(items.get(id)));
-      return api.updateItem(id, patch);
-    },
-    // Mirrors ask.rs: any-word search, 1-hop neighbours, fake cited answer when AI is "on".
-    async ask(question) {
-      const stop = new Set("a an and are as at be by can did do does for from have how i if in is it me my of on or should that the this to was what when where which who why with you about any know tell".split(" "));
-      const words = question.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter(w => w.length > 1 && !stop.has(w));
-      const scored = [];
-      for (const w of words) for (const h of await api.search(w, 10)) {
-        const cur = scored.find(x => x.id === h.id);
-        cur ? (cur.score += h.score) : scored.push({ ...h });
-      }
-      const ranked = scored.sort((a, b) => b.score - a.score).slice(0, 6).map(h => h.id);
-      const edges = links();
-      const sources = [];
-      const add = (id, why) => { if (sources.length < 10 && !sources.some(s => s.id === id)) sources.push({ id, title: items.get(id).title, why }); };
-      ranked.forEach(id => add(id, "match"));
-      for (const id of ranked.slice(0, 3))
-        for (const l of edges) if (l.source === id) add(l.target, "neighbour"); else if (l.target === id) add(l.source, "neighbour");
-      if (!settings.ai.provider) return { answer: null, sources, cited: [], retrieval: "full-text" };
-      const top = sources.slice(0, 2).map(s => items.get(s.id));
-      const answer = top.length
-        ? top.map(it => `${(it.body || it.summary || it.title).replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, t, a) => a || t).split(/(?<=[.!?])\s/)[0]} [[${it.title}]]`).join(" ")
-        : "Your notes don't cover that.";
-      return { answer: `(Browser preview answer) ${answer}`, sources, cited: top.map(t => t.id), retrieval: "full-text" };
-    },
-    async githubSync() {
-      throw new Error("GitHub sync needs the desktop app (browser preview makes no network calls)");
-    },
-    async githubStatus() {
-      return { configured: !!settings.github.token, last_sync: null };
-    },
-    async githubTest() {
-      return { ok: false, message: "Browser preview: no network calls. Test this in the desktop app." };
-    },
+
     on(event, fn) {
       if (event === "vault-changed") return api.onChange(fn);
-      if (!eventListeners.has(event)) eventListeners.set(event, new Set());
-      eventListeners.get(event).add(fn);
-      return () => eventListeners.get(event).delete(fn);
+      return () => {};
     },
     onChange(fn) {
       listeners.add(fn);
@@ -436,30 +357,10 @@ export function createMockBackend({ seed = true } = {}) {
     },
   };
 
-  // A canvas has no frontmatter: only its name can change (its id is its path).
-  function renameCanvas(item, patch) {
-    for (const k of Object.keys(patch || {}))
-      if (!["title", "id", "path", "type", "degree", "lobe_from", "inline_tags", "cards"].includes(k)) throw new Error(`a canvas can't store "${k}": only its name can change`);
-    const title = String(patch.title ?? item.title).trim();
-    if (!title) throw new Error("title can't be empty");
-    if (title === item.title) return view(item);
-    const oldPath = item.path;
-    const dir = oldPath.slice(0, oldPath.lastIndexOf("/"));
-    const path = uniquePath("canvas", title, item.id, dir);
-    items.delete(item.id);
-    Object.assign(item, { id: path, path, title: path.split("/").pop().replace(/\.canvas$/, "") });
-    items.set(item.id, item);
-    rewriteAll([[oldPath.split("/").pop(), path.split("/").pop()], [oldPath, path]], oldPath, path);
-    emit("items");
-    return view(item);
-  }
-
   const ready = seed ? api.importSample() : Promise.resolve();
   // every call waits for the seed, so nothing sees a half-filled vault
-  const guarded = { onChange: api.onChange, on: api.on };
+  const guarded = {};
   for (const [k, fn] of Object.entries(api))
-    if (!["onChange", "on", "importSample", "fileUrl"].includes(k)) guarded[k] = async (...a) => { await ready; return fn(...a); };
-  guarded.importSample = api.importSample;
-  guarded.fileUrl = api.fileUrl;
+    guarded[k] = ["onChange", "on", "importSample", "fileUrl"].includes(k) ? fn : async (...a) => { await ready; return fn(...a); };
   return guarded;
 }
