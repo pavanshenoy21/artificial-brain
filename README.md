@@ -1,180 +1,134 @@
 # Artificial Brain
 
-A personal knowledge base for the desktop: an Obsidian-style workspace (markdown files, wikilinks,
-backlinks, tabs, command palette) with a 3D/2D graph of everything you know, typed items (links,
-skills, hackathons, projects), quick capture from anywhere, and an optional AI that stays out of the
-way until you ask.
+A personal knowledge base that works like Obsidian (a folder of markdown notes, wikilinks, backlinks,
+canvases, a command palette) with a 3D/2D graph where your folders are the brain's lobes.
+Desktop app for **Fedora with Hyprland** (Tauri + WebKitGTK, Wayland native).
 
-Built with Tauri v2 (Rust) + Vite + vanilla JS + three.js (3d-force-graph) + CodeMirror 6.
-Main target: Fedora (GNOME, Wayland). Works on other Linux distros, macOS and Windows.
+The vault is plain files. Obsidian can open the same folder, and the app never adds anything to a note
+that you didn't type (no ids, no timestamps).
+
+## How folders shape the graph
+
+```
+Coding Club/                      lobe: in the graph only its name, in the lobe's colour
+Coding Club/CTF/                  folder: its own colour; every note inside gets it
+Coding Club/CTF/CTFd setup.md     a note, drawn in the CTF colour
+Coding Club/Hackathons/…          another colour, same lobe
+```
+
+Notes hang off their folder, and folders off the lobe's name, as a tree, so each lobe is one chunk in
+3D with its folders as coloured sub-chunks. Plain grey lines are your `[[wikilinks]]`. Colours come from
+two palettes (one for lobes, one for folders) or are picked per folder: right-click a folder → Colour, or
+Settings → Lobes and folder colours. They're saved in the vault (`.brain/colors.json`).
 
 ## Features
 
-- **Plain files.** A vault folder of markdown files with YAML frontmatter (`~/Brain` by default).
-  Obsidian can open the same folder. SQLite is only a search index and can be rebuilt any time.
-  Edits made outside the app (Obsidian, git, an editor) are picked up by a file watcher.
-- **Workspace.** Ribbon, collapsible and resizable sidebars, tabs, status bar. Dark and light themes.
-- **Graph.** Lobes (colour) and types (shape), focus mode (a node plus 1–2 hops, the rest fades),
-  semantic zoom (lobe names from far away, labels up close), type filters, fly to lobe, 2D/3D switch.
-  Solid lines are your `[[wikilinks]]`; faint dashed lines are suggestions.
-- **Editor.** CodeMirror markdown editor with autosave, reading view, `[[` autocomplete,
-  Ctrl+click to follow a link (a missing target is created), renames that rewrite links everywhere.
-- **Sidebars.** Files (real folders or by type), tags, Inbox (untagged items), Tasks, graph filters;
-  properties (forms per type), outgoing links, backlinks with context, unlinked mentions (one click
-  turns a mention into a `[[link]]`), suggested items, and Ask.
-- **Canvas.** Obsidian `.canvas` files open as boards: text cards (markdown), cards that show a note
-  or an image from the vault, link cards, groups, and arrows between them. Double-click to add or
-  edit, drag a card's side dot to connect, Ctrl+scroll to zoom, colours, undo. Saved in Obsidian's
-  own JSON format, so the same board opens in both apps. Notes on a canvas list it as a backlink.
-- **Review (flashcards).** Write `question :: answer` on a line in any note. Review shows the cards
-  that are due and spaces them out (SM-2: 1 day, 3 days, then longer the better you know it).
-  The schedule lives in `.brain/review.json`, so notes stay clean. The status bar shows how many are due.
-- **Tasks.** Every `- [ ]` in the vault in one list, grouped by due date (`📅 2026-10-12`,
-  `due: 2026-10-12` or `@2026-10-12`). Tick them there, in the reading view or on a canvas.
-- **Daily notes.** Ctrl Shift D opens today's note (`daily/YYYY-MM-DD.md`); yesterday/tomorrow from Ctrl P.
-- **Typed items.** Skills (level, since, used in), hackathons (date, role, team, built, stack, …),
-  projects (status, role, stack + GitHub fields), links (url, site, summary).
-- **Quick capture.** A small window (Ctrl Shift Space, or `brain --capture`): paste a URL and press
-  Enter. The page is fetched, titled and summarised in the background. Other text becomes a note.
-- **GitHub sync.** A read-only token turns your repos into project items (description, languages,
-  topics, stars, README). Your own fields and notes are never overwritten.
-- **AI (optional).** Any OpenAI-compatible server: a local llama.cpp server or Groq.
-  - Right-click Polish, Summarize, Fill form from messy text. You always see a diff first; the
-    original is kept in `.brain/history/`. Prompts forbid adding facts.
-  - Tag and lobe suggestions, chosen only from what already exists (Ctrl Enter accepts).
-  - Embeddings (local llama.cpp) for suggested links and search that understands meaning.
-  - Ask: questions answered from your notes with `[[citations]]`; cited notes light up in the graph.
-  - Without AI everything else works; the status bar says "AI off".
+- **File explorer:** folders and files like Obsidian's. New note / folder / canvas, rename (F2 or
+  inline), drag files and folders into folders, "Move file to…", delete (to the vault's `.trash`),
+  sort, collapse all. Renaming or moving updates every `[[link]]` and canvas card that pointed there.
+- **Editor:** CodeMirror with autosave, reading view (Ctrl E), `[[` autocomplete, Ctrl+click to follow a
+  link (a missing note is created), checkboxes you can tick in the reading view.
+- **Properties:** frontmatter shown at the top of the note; edit, add and remove properties and tags.
+- **Right sidebar:** Backlinks (with the line that links here) and unlinked mentions (one click turns a
+  mention into a link), Outgoing links (including notes not created yet), Outline.
+- **Canvas:** Obsidian `.canvas` files: text, note, image and link cards, groups, arrows, colours, undo.
+  Same JSON as Obsidian.
+- **Daily notes:** Ctrl Shift D opens `YYYY-MM-DD.md` (in the vault root, like Obsidian's default).
+- **Search:** Ctrl K finds notes by name and text (SQLite full-text index, rebuilt from the files any time).
+- **Graph:** 3D or 2D (V), focus mode (a note and its neighbours), click a lobe name or folder hub to
+  light up everything in it, semantic zoom (lobe names far away, note names up close).
 
-## Setup (Fedora)
+## Install on Fedora
 
-```sh
-sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file libappindicator-gtk3-devel librsvg2-devel
-sudo dnf group install "c-development"
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # Rust
-sudo dnf install nodejs                                          # Node 20+
+```bash
+# build tools and the libraries Tauri needs
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file libappindicator-gtk3-devel librsvg2-devel libxdo-devel
+sudo dnf group install c-development
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # Rust, if you don't have it
+sudo dnf install nodejs
 
+# build and install the rpm
 npm install
-npm run tauri dev          # run the app
-npm run tauri build        # build packages (rpm, deb, AppImage) into src-tauri/target/release/bundle/
+npm run tauri build
+sudo dnf install ./src-tauri/target/release/bundle/rpm/*.rpm
 ```
 
-On Ubuntu/Debian the build deps are `libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev
-librsvg2-dev libxdo-dev build-essential`.
+Then run `brain` (or open "Artificial Brain" from your launcher). The first start creates `~/Brain`;
+use "Import sample data" for an example vault, or "Open another folder" to point it at your Obsidian vault.
+For development: `npm run tauri dev`.
 
-`npm run dev` runs the UI alone in a browser (port 1420) against an in-memory copy of the sample
-data; add `?empty` to the URL to see the first-run screen.
+## Hyprland
 
-## Quick capture on GNOME Wayland
+The window has no title bar (Hyprland draws the borders). If you float it, drag it by the empty part
+of the tab bar. Useful lines for `~/.config/hypr/hyprland.conf`:
 
-Global shortcuts usually can't be grabbed by apps on Wayland. Bind a GNOME shortcut instead:
-Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts → **+**, command
-`brain --capture`, shortcut Ctrl+Shift+Space. The running app opens its capture window (a second
-`brain` process just hands the request over).
+```ini
+# open the brain
+bind = SUPER, B, exec, brain
 
-## GPU crashes / black or frozen graph (Linux)
+# optional: always on its own workspace (check the class with: hyprctl clients)
+windowrulev2 = workspace 3, class:^(brain)$
+```
 
-The graph is WebGL, drawn through your GPU driver. If you see `MESA: error: ZINK: vkQueueSubmit failed
-(VK_ERROR_DEVICE_LOST)` or the graph goes black, the driver reset. The app keeps working and shows a Reload
-button in the graph. Common fixes on Fedora:
+Launching `brain` again just focuses the open window.
 
-- NVIDIA card on the open nouveau/NVK driver (that's when Mesa uses Zink): install the proprietary driver
-  (`sudo dnf install akmod-nvidia` from RPM Fusion, reboot).
-- Try the other WebKit renderer: `WEBKIT_DISABLE_DMABUF_RENDERER=0 npm run tauri dev`
-  (the app turns DMA-BUF off by default because it flickers on many setups).
-- Skip Zink and use Mesa's software OpenGL (always works, slower with big vaults):
-  `LIBGL_ALWAYS_SOFTWARE=1 npm run tauri dev`.
+### Black, flickering or frozen window (GPU)
 
-## AI setup (optional)
+WebKitGTK's DMA-BUF renderer is turned off by default (`WEBKIT_DISABLE_DMABUF_RENDERER=1`), which fixes
+most blank or flickering windows on Wayland. If the graph still misbehaves:
 
-Settings → AI provider:
-
-- **llama.cpp:** `llama-server -m model.gguf --port 8080`, provider "llama.cpp", URL `http://127.0.0.1:8080/v1`.
-- **Groq:** provider "Groq", paste an API key. The model defaults to `llama-3.1-8b-instant`.
-
-Settings → Embeddings (Groq has none; use a local server):
-`llama-server -m nomic-embed-text-v1.5.Q8_0.gguf --embedding --port 8081`, URL
-`http://127.0.0.1:8081/v1`, then "Embed everything now". Without embeddings, suggested links come
-from shared tags.
-
-Settings are stored in `~/.config/dev.pavvy.brain/settings.json` with 0600 permissions.
-
-## GitHub
-
-Create a fine-grained token (GitHub → Settings → Developer settings → Fine-grained tokens) with
-read access to Contents and Metadata, paste it in Settings → GitHub, then "Sync now". With
-"Sync on startup" the app syncs again when the last sync is over a day old.
+- NVIDIA: try `env = __NV_DISABLE_EXPLICIT_SYNC,1` in `hyprland.conf`, or start with
+  `__NV_DISABLE_EXPLICIT_SYNC=1 brain`.
+- Mesa "device lost" crashes: the graph stops and shows a Reload button; the rest of the app keeps
+  working. `WEBKIT_DISABLE_COMPOSITING_MODE=1 brain` avoids GPU compositing completely.
+- To compare, run once under XWayland: `GDK_BACKEND=x11 brain`.
 
 ## Keyboard
 
 | Keys | Action |
 | --- | --- |
-| Ctrl K or / | Search |
-| Ctrl P | Commands |
+| Ctrl K, Ctrl O or / | Search / open a note |
+| Ctrl P | Command palette |
 | Ctrl N | New note |
 | Ctrl Shift D | Today's daily note |
 | Ctrl G | Graph |
 | Ctrl E | Edit / reading view |
-| Ctrl W | Close tab |
-| Ctrl Tab | Next tab |
-| Ctrl Shift Space | Quick capture (see the Wayland note) |
-| Ctrl Enter | Accept AI suggestions / accept a diff |
+| Ctrl W, Ctrl Tab | Close tab, next tab |
+| F2 | Rename the current file (or the selected row in the explorer) |
 | V | 2D / 3D (graph) |
-| Enter / double-click | Open the selected node in a tab |
-| Esc | Clear focus, close a palette or dialog |
-| Space, then 1–4 | Review: show the answer, then Again / Hard / Good / Easy |
+| Enter / double-click | Open the selected node |
+| Esc | Clear graph focus, close a palette or dialog |
 
-On a canvas: double-click (new card / edit), drag empty space (pan), Shift drag (select), Ctrl scroll
-(zoom), Delete, Ctrl Z / Ctrl Shift Z, Ctrl D (duplicate), Ctrl A, arrows (nudge), Enter (edit).
+In the explorer: arrows move, Right/Left open and close folders, Enter opens, F2 renames, Delete deletes.
+On a canvas: double-click to add or edit, drag a side dot to connect, drag empty space to pan, Shift drag
+to select, Ctrl scroll to zoom, Delete, Ctrl Z / Ctrl Shift Z, Ctrl D duplicate.
 
 ## Vault format
 
 ```
 ~/Brain/
-  notes/ links/ skills/ hackathons/ projects/   one markdown file per item, named after its title
-  canvases/*.canvas                             new canvases (any .canvas anywhere in the vault works)
-  daily/YYYY-MM-DD.md                           daily notes
-  .brain/lobes.json                             lobes (id, name, colour), editable in Settings
-  .brain/review.json                            flashcard schedule
-  .brain/history/                               originals kept by AI actions
-  .trash/                                       deleted items (never hard-deleted)
+  <any folders>/*.md        notes, named after their file
+  <any folders>/*.canvas    canvases (JSON Canvas, same as Obsidian)
+  .brain/colors.json        lobe and folder colours you picked
+  .trash/                   deleted files and folders (never hard-deleted)
+  .obsidian/                left alone if you also use Obsidian
 ```
 
-```markdown
----
-id: 01K5X3M2J8R6Z1Q0V7C4T9N2WB
-type: skill
-title: Rust
-lobe: sys
-tags: [rust, systems]
-level: beginner
-used_in: ["[[Artificial Brain]]"]
-created: 2026-09-24T10:00:00+05:30
-updated: 2026-09-24T10:00:00+05:30
----
-Free markdown. [[Wikilinks]] here and in frontmatter values become graph links.
-```
-
-Files without frontmatter work too: the folder gives the type and the file name gives the title.
+The search index lives in `~/.local/share/dev.pavvy.brain/brain.db` and is only a cache ("Rebuild index"
+in Ctrl P re-reads every file). Settings (vault folder, theme) are in `~/.config/dev.pavvy.brain/settings.json`.
 
 ## Development
 
 ```
-src/                     frontend (vanilla JS modules)
-  main.js state.js api.js actions.js core-commands.js
-  shell/ graph/ sidebar/ editor/ palette/ forms/ ai/ settings/ lib/ mock/
-  theme.css app.css capture.html → capture.js
-src-tauri/src/           Rust backend
-  vault.rs index.rs store.rs markdown.rs watch.rs settings.rs commands.rs
-  capture.rs enrich.rs ai.rs embed.rs assist.rs ask.rs github.rs
+src-tauri/src/   vault.rs (files, frontmatter) · markdown.rs · index.rs (SQLite + FTS5) · store.rs (CRUD,
+                 renames, folders, link rewriting) · canvas.rs · watch.rs · settings.rs · commands.rs
+src/             main.js · state.js · api.js (+ mock/backend.js) · actions.js · graph/ · sidebar/ (explorer,
+                 menus, right) · editor/ · canvas/ · palette/ · settings/ · shell/ · lib/
 ```
 
-- All frontend↔backend calls go through `src/api.js`; outside Tauri it uses `src/mock/backend.js`.
-- Tests: `npm test` (frontend, node --test) and `cd src-tauri && cargo test` (Rust, including
-  mock-runtime tests against loopback fake AI/GitHub servers; no internet).
-- UI tests: `npm run test:e2e` (Playwright, 44 tests against the browser build + mock backend; any page
-  error fails a test).
-- `cargo clippy --all-targets` is clean.
-- `scripts/desktop-smoke.sh` runs the real release build under Xvfb: import, outside edit (watcher),
-  `--capture`, and typing right before closing the window must reach the file. It takes screenshots.
-- Design and implementation choices are logged in `DECISIONS.md`.
+- All frontend↔backend calls go through `src/api.js`; outside Tauri it uses `src/mock/backend.js`, so
+  `npm run dev` (port 1420) works in a browser with the sample vault (`?empty` starts empty).
+- Checks: `npm test` (unit), `npm run test:e2e` (Playwright, browser build), `cd src-tauri && cargo test &&
+  cargo clippy --all-targets`.
+- `scripts/desktop-smoke.sh` runs the real release build under Xvfb (see the script header).
+- Design choices are logged in `DECISIONS.md`.

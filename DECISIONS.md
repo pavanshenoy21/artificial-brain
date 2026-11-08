@@ -154,3 +154,16 @@ One line each: what was chosen and why. Newest at the bottom of each milestone.
 - Small `.brain/<name>.json` state files go through two generic commands (`get_brain_state` / `set_brain_state`) with names restricted to `[A-Za-z0-9_-]`, so nothing outside `.brain/` can be reached and lobes.json can't be clobbered through them.
 - Canvases are left out of the Inbox (they can't hold tags) and of the AI text actions.
 - Canvas camera: the board is fitted to its cards the first time it has both its JSON and a size (a tab opened in the background, or a slow disk, used to leave it at 100% around the origin). After that the view is remembered per canvas. In narrow panes the toolbar drops its labels (icons + tooltips).
+
+## Nov 2026: back to an exact Obsidian copy, folders as lobes (Pavvy's call)
+- Scope cut to Obsidian's core plus the 3D/2D graph; everything else removed (see CLAUDE.md "Direction now"). Fedora + Hyprland is the only target.
+- Identity = vault path, title = file name, type from the extension (.md note, .canvas canvas). No ids or timestamps are written; a frontmatter `id:`/`title:`/`type:` is just a property. Properties travel as `props` so they can't clash with those fields, and patches put them under `props`.
+- Writes keep the frontmatter block byte for byte when only the body changed (comments, quoting, even broken YAML survive), and keep CRLF.
+- New notes are "Untitled", "Untitled 1", … (Obsidian's naming) in the vault root, or in a folder when created from the explorer or "current folder" commands. Daily notes go to the root as `YYYY-MM-DD.md`, like Obsidian's default.
+- Link resolution follows Obsidian: file name or path, aliases, and for duplicate names the one nearest the root wins. Frontmatter `title:` no longer resolves links.
+- Renames and moves (files and folders) rewrite name links, path links (`[[Folder/Note]]`) and canvas file cards in one pass over the vault, then return the moved paths so open tabs, the selection and graph positions follow (`app.moved()`).
+- Lobes are top-level folders. The graph draws a lobe as its name only (a pinned, label-only node), each subfolder as a small hub in its colour, and tree lines note → folder → lobe in the child's colour; wikilinks stay grey. Lobe centres use the sunflower spiral, biggest lobe in the middle.
+- Colours: two fixed palettes (lobes; folders, walked lobe by lobe so siblings never share an automatic colour), deeper folders inherit their group's colour, picks saved in `.brain/colors.json` (validated `#rgb/#rrggbb`) and moved along when a folder is renamed.
+- The file explorer behaves like Obsidian's: click opens, folders first, F2/inline rename, drag to move (onto a folder, or a root-level row for the root), confirm before delete, sort A–Z/Z–A, collapse all. New files from the header buttons go into the last folder used in the explorer.
+- The main window has no GTK title bar (Hyprland draws borders); the empty part of the tab bar is a drag region for floating windows. The bundle is rpm only.
+- Fixed while testing: the remembered active tab was overwritten while restoring tabs at startup, so the app always opened on the graph.

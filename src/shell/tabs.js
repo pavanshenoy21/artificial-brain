@@ -34,7 +34,7 @@ function renderBar() {
       ${html}<span class="tab-title">${esc(text)}</span>
       ${t.kind === "graph" ? "" : `<button type="button" class="tab-close" aria-label="Close tab">${icon("x", { size: 14 })}</button>`}
     </div>`;
-  }).join("") + `<div class="tabbar-fill"></div>
+  }).join("") + `<div class="tabbar-fill" data-tauri-drag-region></div>
     <button type="button" class="icon-btn" data-act="toggle-right" title="Toggle right sidebar">${icon("panel-right")}</button>`);
 }
 

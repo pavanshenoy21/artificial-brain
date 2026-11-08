@@ -11,6 +11,8 @@
     "dialog:default",
     "core:window:allow-hide",
     "core:window:allow-set-focus",
-    "core:window:allow-destroy"
+    "core:window:allow-destroy",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize"
   ]
 }

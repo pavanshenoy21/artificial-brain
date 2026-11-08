@@ -9,7 +9,19 @@ Style in interactive sessions: casual, short back-and-forth. Ask before building
 > build. If something needs Pavvy (tokens, local models, a real display), build it with a clean fallback
 > and list it in `TODO-PAVVY.md`.
 
-## Vision
+## Direction now (Nov 2026, from Pavvy) — this overrides the older sections below
+- **First, an exact copy of Obsidian**, for **Fedora + Hyprland only**: file explorer (folders, new note/folder/
+  canvas, rename, move, delete, drag and drop), editor + reading view, wikilinks, backlinks + unlinked mentions,
+  outgoing links, outline, properties, tags, search, command palette, canvas, daily notes. Plus the 3D/2D graph.
+- **Lobes = top-level folders.** In the graph a lobe is only its name, in the lobe's colour (no node). Its
+  subfolders ("tags" in Pavvy's words) each get their own colour; notes take their folder's colour; notes hang
+  off their folder and folders off the lobe name as a tree. Colours: palettes, or picked per folder
+  (`.brain/colors.json`).
+- **Removed for now** (to be re-designed with Pavvy, then rebuilt): typed items + forms, frontmatter lobes, AI
+  (polish, suggestions, Ask, embeddings), GitHub sync, quick capture, Inbox, flashcards, Tasks pane.
+- A note's identity is its path; the app writes no ids/timestamps into files.
+
+## Vision (original)
 A personal knowledge base that feels like **Obsidian on steroids**: the same calm, dense, keyboard-first
 workspace (markdown files, wikilinks, backlinks, tabs, command palette), plus a 3D/2D graph "brain",
 typed items (links, skills, hackathons, projects), and an AI that lives in the graph.
@@ -183,24 +195,17 @@ Esc clear focus / close palette.
 - Don't commit secrets, `node_modules`, `dist` or `target`.
 
 ## Current state
-- All 10 milestones are built (see git log, one commit per milestone). Since then: Obsidian canvas
-  support, flashcard review (spaced repetition), tasks, daily notes, unlinked mentions. `README.md` has setup, features and
-  shortcuts; `DECISIONS.md` logs every call made along the way; `TODO-PAVVY.md` lists what needs Pavvy.
-- Rust (`src-tauri/src/`): `vault.rs` (files, frontmatter, lobes.json, trash, history), `index.rs` (SQLite: items,
-  tags, links, items_fts, embeddings, meta), `store.rs` (sync, CRUD, rename rewriting, import, rebuild),
-  `markdown.rs` (frontmatter + wikilinks), `settings.rs` (settings.json, 0600, secrets redacted for the UI),
-  `watch.rs` (notify watcher), `capture.rs` (capture window, link fetch/extract pipeline), `enrich.rs` (post-save
-  hooks), `ai.rs` (OpenAI-compatible client), `embed.rs` (vectors, worker, similar links, semantic search),
-  `assist.rs` (Polish/Summarize/Fill form/suggestions), `ask.rs` (RAG answers), `github.rs` (repo sync),
-  `canvas.rs` (Obsidian .canvas JSON: parse, validate, render, rename rewriting),
-  `commands.rs`, `state.rs`, `error.rs`, `tests_integration.rs` (mock runtime + loopback fake servers).
-- Frontend (`src/`): `main.js` (bootstrap, keys), `state.js` (shared state + events), `api.js` (+ `mock/backend.js`),
-  `actions.js`, `core-commands.js`, `shell/` (layout, tabs, statusbar, toast, empty state, menu), `graph/view.js`,
-  `sidebar/` (left: files/tags/inbox/filters, right: item), `editor/` (item tab, CodeMirror, markdown-it),
-  `palette/` (palette, search, commands), `forms/` (field controls, New … dialog), `ai/` (actions, review dialog,
-  Ask pane), `settings/view.js`, `canvas/` (model + board view), `review/` (flashcard review tab),
-  `lib/` (types + forms, lobes, wikilinks, prefs, rank, tasks, srs, mentions), `capture.html` + `capture.js`,
-  `theme.css` + `app.css`.
+- Obsidian-copy rebuild (see "Direction now"). Earlier milestone work (AI, GitHub, capture, typed items…) is in
+  git history before commit "Rebuild as an Obsidian copy with folder lobes".
+- Rust (`src-tauri/src/`): `vault.rs` (files, frontmatter kept byte-for-byte when unchanged, CRLF kept, trash),
+  `markdown.rs` (frontmatter + wikilinks), `index.rs` (SQLite: items keyed by path, tags, links, FTS5),
+  `store.rs` (sync, CRUD, renames, folders create/rename/move/delete, link + canvas-card rewriting, colours),
+  `canvas.rs`, `watch.rs`, `settings.rs` (vault + theme), `commands.rs`, `state.rs`, `tests_obsidian.rs`.
+- Frontend (`src/`): `main.js`, `state.js` (paths as ids, `app.moved()` for renames), `api.js` (+ `mock/backend.js`),
+  `actions.js` (file ops), `graph/view.js` (lobe labels, folder hubs, tree), `sidebar/` (`left.js` explorer + tags,
+  `menus.js` file/folder menus + folder picker, `right.js` backlinks/outgoing/outline), `editor/` (note tab with
+  inline title + properties), `canvas/`, `palette/`, `settings/view.js` (vault, theme, colours), `lib/` (folders
+  colours/lobes, wikilinks, mentions, tasks, tags, prefs, rank), `shell/`.
 - Run: `npm install && npm run tauri dev` (browser only: `npm run dev`, port 1420; `?empty` = empty mock vault).
 - Checks: `npm test`, `npm run test:e2e` (Playwright), `npm run build`, `cd src-tauri && cargo test && cargo clippy --all-targets` (all clean).
 - Cloud sessions CAN run the real desktop build headless: install `xvfb xdotool imagemagick dbus-x11` + `pip install python-xlib`, then
