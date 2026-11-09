@@ -3,7 +3,8 @@
 # Starts the release binary under Xvfb with a throwaway HOME, imports the
 # sample vault, writes a file from outside (watcher), launches a second
 # process (must just focus the first), checks typing is saved when the window
-# closes, and takes screenshots.
+# closes, checks the git backup on close (vault repo -> bare remote), and
+# takes screenshots.
 #
 #   sudo apt-get install -y xvfb xdotool imagemagick dbus-x11   # once
 #   pip install python-xlib                                      # once
@@ -17,6 +18,12 @@ mkdir -p "$OUT/home"
 
 run() {
   export DISPLAY=:97 HOME="$OUT/home" WEBKIT_DISABLE_COMPOSITING_MODE=1
+  # the vault is a git repo whose origin is a local bare repo (stands in for GitHub)
+  mkdir -p "$HOME/Brain"
+  git init -q -b main "$HOME/Brain"
+  git init -q --bare "$OUT/remote.git"
+  git -C "$HOME/Brain" remote add origin "$OUT/remote.git"
+  git config --global user.name "Smoke Test"; git config --global user.email smoke@example.invalid
   "$BIN" > "$OUT/app.log" 2>&1 &
   local app=$!
   sleep 10
@@ -50,6 +57,12 @@ run() {
     echo "close flush: FAILED"; ls "$HOME/Brain"; cat "$HOME/Brain/Close test.md" 2>/dev/null || true
   fi
   kill "$app" 2>/dev/null || true
+  # the app commits and pushes on close
+  if git --git-dir="$OUT/remote.git" log -1 --format=%s main 2>/dev/null | grep -q "Vault backup"; then
+    echo "git backup: ok ($(git --git-dir="$OUT/remote.git" log -1 --format=%s main), $(git --git-dir="$OUT/remote.git" ls-tree -r --name-only main | grep -c '\.md$') notes on the remote)"
+  else
+    echo "git backup: FAILED"; grep -i backup "$OUT/app.log" || true
+  fi
 }
 
 Xvfb :97 -screen 0 1400x900x24 > /dev/null 2>&1 &

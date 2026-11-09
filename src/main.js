@@ -165,6 +165,16 @@ try {
 }
 tabs.restore();
 
+// If the last git backup (when the app closed) failed, say so once: the
+// details and "Back up now" are in Settings.
+function showBackup(last) {
+  if (last && !last.ok && app.settings?.git_backup !== false) status.set("backup", "backup failed", last.message);
+  else status.set("backup", "");
+}
+api.gitStatus().then(g => showBackup(g?.last)).catch(() => {});
+app.on("backup", showBackup);
+app.on("open-settings", openSettings);
+
 // Don't lose the last half-second of typing: flush autosaves when the window
 // is hidden or closed.
 addEventListener("pagehide", () => tabs.saveAll());

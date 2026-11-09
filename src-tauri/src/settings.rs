@@ -15,11 +15,13 @@ pub struct Settings {
     pub vault: String,
     /// "dark" | "light"
     pub theme: String,
+    /// Commit and push the vault with git when the app closes.
+    pub git_backup: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { vault: String::new(), theme: "dark".into() }
+        Settings { vault: String::new(), theme: "dark".into(), git_backup: true }
     }
 }
 
@@ -63,7 +65,7 @@ mod tests {
     #[test]
     fn old_settings_files_still_load() {
         let s: Settings = serde_json::from_str(r#"{"vault":"~/Notes","theme":"light","ai":{"provider":"groq"},"github":{"token":"x"}}"#).unwrap();
-        assert_eq!(s, Settings { vault: "~/Notes".into(), theme: "light".into() });
+        assert_eq!(s, Settings { vault: "~/Notes".into(), theme: "light".into(), git_backup: true });
         assert_eq!(s.vault_dir(Path::new("/home/p")), PathBuf::from("/home/p/Notes"));
         assert_eq!(Settings::default().vault_dir(Path::new("/home/p")).file_name().unwrap(), "Brain");
     }

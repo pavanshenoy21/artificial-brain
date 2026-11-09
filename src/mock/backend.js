@@ -63,7 +63,7 @@ function validateCanvas(d) {
   for (const e of d.edges || []) if (!ids.has(e.fromNode) || !ids.has(e.toNode)) throw new Error("every canvas edge needs fromNode and toNode on this canvas");
 }
 
-export const DEFAULT_SETTINGS = { vault: "", theme: "dark" };
+export const DEFAULT_SETTINGS = { vault: "", theme: "dark", git_backup: true };
 
 export function createMockBackend({ seed = true } = {}) {
   const items = new Map();      // path -> { path, type, tags, body, fields, canvas? }
@@ -265,11 +265,18 @@ export function createMockBackend({ seed = true } = {}) {
       return { ...settings };
     },
     async saveSettings(next) {
-      settings = { vault: next.vault ?? "", theme: next.theme ?? "dark" };
+      settings = { vault: next.vault ?? "", theme: next.theme ?? "dark", git_backup: next.git_backup ?? true };
       try { localStorage.setItem("brain.mock.settings", JSON.stringify(settings)); } catch {}
       return { ...settings };
     },
     fileUrl: () => null,
+    // git backup needs the desktop app (and a real folder)
+    async gitStatus() {
+      return { enabled: settings.git_backup, repo: { is_repo: false, branch: null, remote: null, upstream: null }, last: null };
+    },
+    async gitBackupNow() {
+      throw new Error("Git backup works in the desktop app");
+    },
 
     // ---- canvases
     async createCanvas(title, folder) {

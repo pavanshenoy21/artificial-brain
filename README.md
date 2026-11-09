@@ -37,6 +37,7 @@ Settings → Lobes and folder colours. They're saved in the vault (`.brain/color
 - **Search:** Ctrl K finds notes by name and text (SQLite full-text index, rebuilt from the files any time).
 - **Graph:** 3D or 2D (V), focus mode (a note and its neighbours), click a lobe name or folder hub to
   light up everything in it, semantic zoom (lobe names far away, note names up close).
+- **Git backup:** when the app closes it commits and pushes the vault (see below).
 
 ## Install on Fedora
 
@@ -103,6 +104,32 @@ In the explorer: arrows move, Right/Left open and close folders, Enter opens, F2
 On a canvas: double-click to add or edit, drag a side dot to connect, drag empty space to pan, Shift drag
 to select, Ctrl scroll to zoom, Delete, Ctrl Z / Ctrl Shift Z, Ctrl D duplicate.
 
+## Git backup
+
+When you close the app it runs `git add -A`, `git commit` and `git push` in the vault folder, so your
+notes end up on GitHub and you can `git clone` / `git pull` them on another device. Set the repository
+up once in a terminal:
+
+```
+cd ~/Brain
+git init -b main                                   # skip if it's already a repo
+git remote add origin git@github.com:<you>/<repo>.git
+git add -A && git commit -m "first commit" && git push -u origin main
+```
+
+Git must be able to push without asking anything: use an SSH key (`ssh -T git@github.com` should work
+without a password prompt, so load the key in an agent or leave it without a passphrase) or a credential
+helper for HTTPS. The app never waits for a prompt; it gives up after 90 seconds.
+
+- Commits look like "Vault backup from <hostname>: 3 files changed". Nothing changed means no commit.
+- If the push is rejected because the remote has commits you don't have (you backed up from another
+  device), the commit stays local and the app tells you to run `git pull` in the vault. Pull before you
+  start writing on a second device and this won't happen.
+- A merge or rebase you left half-done is never touched.
+- The last result is in Settings → Backup (git), with a "Back up now" button. A failed backup also shows
+  "backup failed" in the status bar. The toggle there turns it off.
+- `.trash/` is committed like everything else; add it to a `.gitignore` in the vault if you don't want that.
+
 ## Vault format
 
 ```
@@ -115,13 +142,13 @@ to select, Ctrl scroll to zoom, Delete, Ctrl Z / Ctrl Shift Z, Ctrl D duplicate.
 ```
 
 The search index lives in `~/.local/share/dev.pavvy.brain/brain.db` and is only a cache ("Rebuild index"
-in Ctrl P re-reads every file). Settings (vault folder, theme) are in `~/.config/dev.pavvy.brain/settings.json`.
+in Ctrl P re-reads every file). Settings (vault folder, theme, git backup) are in `~/.config/dev.pavvy.brain/settings.json`.
 
 ## Development
 
 ```
 src-tauri/src/   vault.rs (files, frontmatter) · markdown.rs · index.rs (SQLite + FTS5) · store.rs (CRUD,
-                 renames, folders, link rewriting) · canvas.rs · watch.rs · settings.rs · commands.rs
+                 renames, folders, link rewriting) · canvas.rs · watch.rs · settings.rs · gitsync.rs (backup on close) · commands.rs
 src/             main.js · state.js · api.js (+ mock/backend.js) · actions.js · graph/ · sidebar/ (explorer,
                  menus, right) · editor/ · canvas/ · palette/ · settings/ · shell/ · lib/
 ```

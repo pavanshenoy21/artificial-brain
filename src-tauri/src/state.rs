@@ -14,6 +14,8 @@ pub struct AppState {
     pub watcher: Mutex<Option<Watcher>>,
     pub settings_file: PathBuf,
     pub db_file: PathBuf,
+    /// Outcome of the last git backup (`git-backup.json` in the app data dir).
+    pub backup_file: PathBuf,
     pub home: PathBuf,
     /// Why the vault failed to open, shown by the UI instead of crashing.
     pub open_error: Mutex<Option<String>>,

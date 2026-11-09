@@ -1,6 +1,7 @@
 mod canvas;
 mod commands;
 mod error;
+mod gitsync;
 mod index;
 mod markdown;
 mod settings;
@@ -40,6 +41,7 @@ pub fn run() {
                 watcher: Mutex::new(None),
                 settings_file,
                 db_file: paths.app_data_dir()?.join("brain.db"),
+                backup_file: paths.app_data_dir()?.join("git-backup.json"),
                 home: paths.home_dir()?,
                 open_error: Mutex::new(None),
             };
@@ -69,7 +71,22 @@ pub fn run() {
             commands::delete_folder,
             commands::move_item,
             commands::set_folder_color,
+            commands::git_status,
+            commands::git_backup_now,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // The window is gone (unsaved typing was flushed before it closed):
+            // commit and push the vault, then let the process end.
+            if let tauri::RunEvent::Exit = event {
+                let state = app.state::<AppState>();
+                let settings = state.settings();
+                if settings.git_backup {
+                    let result = gitsync::backup(&settings.vault_dir(&state.home));
+                    eprintln!("git backup: {}", result.message);
+                    gitsync::save_last(&state.backup_file, &result);
+                }
+            }
+        });
 }

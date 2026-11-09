@@ -200,11 +200,11 @@ Esc clear focus / close palette.
 - Rust (`src-tauri/src/`): `vault.rs` (files, frontmatter kept byte-for-byte when unchanged, CRLF kept, trash),
   `markdown.rs` (frontmatter + wikilinks), `index.rs` (SQLite: items keyed by path, tags, links, FTS5),
   `store.rs` (sync, CRUD, renames, folders create/rename/move/delete, link + canvas-card rewriting, colours),
-  `canvas.rs`, `watch.rs`, `settings.rs` (vault + theme), `commands.rs`, `state.rs`, `tests_obsidian.rs`.
+  `canvas.rs`, `watch.rs`, `settings.rs` (vault + theme + git_backup), `gitsync.rs` (commit + push the vault on app exit), `commands.rs`, `state.rs`, `tests_obsidian.rs`.
 - Frontend (`src/`): `main.js`, `state.js` (paths as ids, `app.moved()` for renames), `api.js` (+ `mock/backend.js`),
   `actions.js` (file ops), `graph/view.js` (lobe labels, folder hubs, tree), `sidebar/` (`left.js` explorer + tags,
   `menus.js` file/folder menus + folder picker, `right.js` backlinks/outgoing/outline), `editor/` (note tab with
-  inline title + properties), `canvas/`, `palette/`, `settings/view.js` (vault, theme, colours), `lib/` (folders
+  inline title + properties), `canvas/`, `palette/`, `settings/view.js` (vault, theme, git backup, colours), `lib/` (folders
   colours/lobes, wikilinks, mentions, tasks, tags, prefs, rank), `shell/`.
 - Run: `npm install && npm run tauri dev` (browser only: `npm run dev`, port 1420; `?empty` = empty mock vault).
 - Checks: `npm test`, `npm run test:e2e` (Playwright), `npm run build`, `cd src-tauri && cargo test && cargo clippy --all-targets` (all clean).

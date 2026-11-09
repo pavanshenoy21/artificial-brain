@@ -50,6 +50,8 @@ function tauriBackend() {
     deleteFolder: path => call("delete_folder", { path }),
     moveItem: (id, folder) => call("move_item", { id, folder }),     // [[old, new]]
     setFolderColor: (folder, color) => call("set_folder_color", { folder, color }),
+    gitStatus: () => call("git_status"),                      // { enabled, repo: { is_repo, branch, remote, upstream }, last }
+    gitBackupNow: () => call("git_backup_now"),               // { at, ok, committed, pushed, files, message }
     on(event, fn) {
       let un;
       let dead = false;

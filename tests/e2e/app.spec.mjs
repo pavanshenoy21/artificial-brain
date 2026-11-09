@@ -577,3 +577,18 @@ test.describe("canvas", () => {
     await expect.poll(async () => (await stored(page)).nodes.some(n => n.file === "Learning/CP/Dijkstra.md")).toBe(true);
   });
 });
+
+test.describe("settings", () => {
+  test("backup section: the git toggle is saved; the browser preview has no repo", async ({ page, errors }) => {
+    await openApp(page);
+    await page.getByTitle("Settings", { exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Backup (git)" })).toBeVisible();
+    await expect(page.getByText("isn't a git repository yet")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Back up now" })).toBeDisabled();
+    const toggle = page.locator('[data-act="git-toggle"]');
+    await expect(toggle).toBeChecked();
+    await toggle.uncheck();
+    await expect.poll(() => page.evaluate(() => window.brain.app.settings.git_backup)).toBe(false);
+    expect((await page.evaluate(() => window.brain.api.getSettings())).git_backup).toBe(false);
+  });
+});

@@ -11,7 +11,7 @@ use crate::settings::Settings;
 use crate::state::AppState;
 use crate::store::{Colors, Graph, Moved, SampleFile, Store, SyncReport};
 use crate::vault::Item;
-use crate::watch;
+use crate::{gitsync, watch};
 
 type Cmd<T> = std::result::Result<T, String>;
 
@@ -216,4 +216,31 @@ pub async fn set_folder_color(app: AppHandle, state: State<'_, AppState>, folder
     let c = run(&state, |s| s.set_color(&folder, color.as_deref()))?;
     changed(&app, "colors");
     Ok(c)
+}
+
+// ---------------------------------------------------------------- git backup
+
+#[derive(Serialize)]
+pub struct GitStatus {
+    enabled: bool,
+    repo: gitsync::RepoInfo,
+    last: Option<gitsync::Backup>,
+}
+
+/// The vault's git setup and how the last backup went.
+#[tauri::command]
+pub async fn git_status(state: State<'_, AppState>) -> Cmd<GitStatus> {
+    let settings = state.settings();
+    let vault = settings.vault_dir(&state.home);
+    let repo = tauri::async_runtime::spawn_blocking(move || gitsync::repo_info(&vault)).await.map_err(|e| e.to_string())?;
+    Ok(GitStatus { enabled: settings.git_backup, repo, last: gitsync::load_last(&state.backup_file) })
+}
+
+/// Commit and push now (the same thing that runs when the app closes).
+#[tauri::command]
+pub async fn git_backup_now(state: State<'_, AppState>) -> Cmd<gitsync::Backup> {
+    let vault = state.settings().vault_dir(&state.home);
+    let result = tauri::async_runtime::spawn_blocking(move || gitsync::backup(&vault)).await.map_err(|e| e.to_string())?;
+    gitsync::save_last(&state.backup_file, &result);
+    Ok(result)
 }
