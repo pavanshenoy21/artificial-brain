@@ -238,7 +238,7 @@ export function createGraphView(container) {
     const f = alpha => {
       for (const n of ns) {
         if (n.kind === "lobe") continue;
-        const c = centers.get(n.lobe ?? "") || [0, 0, 0];
+        const c = centers.get(n.__lobe ?? "") || [0, 0, 0];
         n.vx += (c[0] - n.x) * strength * alpha;
         n.vy += (c[1] - n.y) * strength * alpha;
         if (state.flat) n.vz -= n.z * 0.2; // not scaled by alpha: keeps pulling until flat
@@ -250,11 +250,13 @@ export function createGraphView(container) {
   }
   const lobeKey = n => (n.kind === "lobe" ? n.name : n.kind === "folder" ? lobeOf(`${n.path}/x`) : lobeOf(n.path) ?? "");
   Graph.d3Force("center", null);
-  Graph.d3Force("charge").strength(n => (n.kind === "lobe" ? -120 : n.kind === "folder" ? -70 : -40)).distanceMax(170);
+  // A lobe's name repels only a little: enough to keep notes off the text,
+  // not so much that it pushes its own notes out between the lobes.
+  Graph.d3Force("charge").strength(n => (n.kind === "lobe" ? -60 : n.kind === "folder" ? -60 : -40)).distanceMax(150);
   Graph.d3Force("link")
     .distance(l => (l.kind === "tree" ? (nodeOf(l.target)?.kind === "lobe" ? 30 : 16) : 24))
     .strength(l => (l.kind === "tree" ? 0.5 : lobeKey(nodeOf(l.source)) === lobeKey(nodeOf(l.target)) ? 0.25 : 0.008));
-  Graph.d3Force("lobe", lobeForce(0.1));
+  Graph.d3Force("lobe", lobeForce(0.15));
 
   // ---------------------------------------------------------------- render on demand
   // 3d-force-graph redraws every frame forever. Once the layout has settled
@@ -374,7 +376,6 @@ export function createGraphView(container) {
       tree.push({ source: key, target: depth(p) >= 2 ? `folder:${p}` : `lobe:${p}`, kind: "tree" });
       const h = hubs.get(key) || { id: key, kind: "folder", path, name: path.split("/").pop() };
       h.members = members;
-      h.lobe = lobeOf(`${path}/x`);
       hubs.set(key, h);
     }
     for (const k of [...hubs.keys()]) if (!wantHubs.has(k.slice(7))) hubs.delete(k);
@@ -396,14 +397,15 @@ export function createGraphView(container) {
       if (a.__v) a.__v.label.color = colorOf(a); // colours may have been picked
     }
     for (const n of [...ns, ...hubs.values()]) {
-      n.lobe = lobeKey(n);
+      // `__` fields survive app.reload() (it drops unknown plain keys)
+      n.__lobe = lobeKey(n);
       if (n.__v) {
         n.__v.mesh.material.color.set(colorOf(n));
         if (n.kind === "folder" && n.__v.label) n.__v.label.color = colorOf(n);
       }
       if (n.x !== undefined) continue;
       // new node: start near its lobe so the layout settles fast
-      const c = centers.get(n.lobe) || [0, 0, 0];
+      const c = centers.get(n.__lobe) || [0, 0, 0];
       n.x = c[0] + (Math.random() - 0.5) * 30;
       n.y = c[1] + (Math.random() - 0.5) * 30;
       n.z = state.flat ? 0 : c[2] + (Math.random() - 0.5) * 30;
